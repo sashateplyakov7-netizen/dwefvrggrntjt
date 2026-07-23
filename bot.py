@@ -10,11 +10,12 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from config import BOT_TOKEN, FREE_DAILY_LIMIT, ADMIN_ID, TARIFFS, TARIFF_STARS
+from config import BOT_TOKEN, FREE_DAILY_LIMIT, ADMIN_ID, TARIFFS, TARIFF_STARS, BOT_USERNAME
 from database import (
     init_db, get_or_create_user, increment_downloads, activate_subscription,
     get_admin_stats, grant_sub_by_admin, revoke_sub_by_admin, get_all_users,
-    get_user_stats, get_user_tariff, can_download
+    get_user_stats, get_user_tariff, can_download,
+    generate_referral_link, process_referral, get_referral_info
 )
 from downloader import download_media, detect_platform
 
@@ -48,6 +49,7 @@ def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Моя статистика", callback_data="my_stats")],
         [InlineKeyboardButton(text="💳 Выбрать тариф", callback_data="show_tariffs")],
+        [InlineKeyboardButton(text="🎁 Пригласить друга", callback_data="referral")],
         [InlineKeyboardButton(text="📞 Связаться с админом", callback_data="contact_admin")]
     ])
 
@@ -77,6 +79,7 @@ def get_admin_keyboard():
 def get_user_stats_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Выбрать тариф", callback_data="show_tariffs")],
+        [InlineKeyboardButton(text="🎁 Пригласить друга", callback_data="referral")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
@@ -112,6 +115,7 @@ async def cmd_stats(message: types.Message):
     stats = await get_user_stats(user_id)
     tariff = await get_user_tariff(user_id)
     tariff_info = TARIFFS.get(tariff, TARIFFS["free"])
+    referral_info = await get_referral_info(user_id)
     
     if stats:
         text = (
@@ -122,7 +126,11 @@ async def cmd_stats(message: types.Message):
             f"📊 Статус: {'🟢 Активна' if stats['is_subscribed'] == 1 else '🔴 Не активна'}\n"
             f"📅 Действует до: {stats['sub_end_date'] or 'Нет'}\n\n"
             f"📱 Доступно платформ: {len(tariff_info['platforms']) if tariff_info['platforms'] != ['all'] else 'Все'}\n"
-            f"📊 Лимит в день: {tariff_info['daily_limit'] if tariff_info['daily_limit'] != 9999 else '∞'}"
+            f"📊 Лимит в день: {tariff_info['daily_limit'] if tariff_info['daily_limit'] != 9999 else '∞'}\n\n"
+            f"🎁 **Рефералы:**\n"
+            f"• Приглашено: {referral_info['count']} друзей\n"
+            f"• Награда за 1 друга: {'✅ Получен' if referral_info['standard_used'] else '❌ Не получен'}\n"
+            f"• Награда за 3 друзей: {'✅ Получен' if referral_info['premium_used'] else '❌ Не получен'}\n"
         )
     else:
         text = "⚠️ Не удалось получить данные."
@@ -142,6 +150,9 @@ async def cmd_help(message: types.Message):
         "/admin — Панель управления (админ)\n"
         "/help — Эта справка\n\n"
         "🔗 Просто отправь ссылку на видео — я скачаю его!\n\n"
+        "🎁 **Реферальная программа:**\n"
+        "• Пригласи 1 друга → получи Стандарт на месяц\n"
+        "• Пригласи 3 друзей → получи Премиум на месяц\n\n"
         "📱 Поддерживаемые платформы:\n"
         "• TikTok\n"
         "• Instagram (Reels, видео)\n"
@@ -155,20 +166,69 @@ async def cmd_help(message: types.Message):
     )
 
 # ==========================================
-# КОМАНДА /START
+# 🔥 КОМАНДА /START (С РЕФЕРАЛЬНОЙ ССЫЛКОЙ)
 # ==========================================
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
-    await get_or_create_user(message.from_user.id)
+    user_id = message.from_user.id
+    args = message.text.split()
+    
+    # Проверяем реферальную ссылку
+    if len(args) > 1 and args[1].startswith("ref_"):
+        try:
+            referrer_id = int(args[1].replace("ref_", ""))
+            if referrer_id != user_id:
+                result = await process_referral(user_id, referrer_id)
+                await message.answer(result, parse_mode="Markdown")
+            else:
+                await message.answer("❌ Нельзя пригласить самого себя!")
+        except ValueError:
+            pass
+    
+    await get_or_create_user(user_id)
     await message.answer(
         "👋 **Салют! Я качаю видео без водяных знаков** из TikTok, Reels, Shorts и Pinterest!\n\n"
         "🔗 Просто отправь мне ссылку на видео.\n"
         f"📊 Твой лимит: {FREE_DAILY_LIMIT} бесплатных скачиваний в день.\n\n"
         "ℹ️ *Поддерживаемые платформы:* TikTok, Instagram, YouTube, Pinterest, Twitter/X, Facebook\n\n"
+        "🎁 **Пригласи друга — получи подписку!**\n"
+        "• 1 друг → Стандарт на месяц\n"
+        "• 3 друга → Премиум на месяц\n\n"
         "💡 Для большего выбери подходящий тариф!",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
+
+# ==========================================
+# 🔥 РЕФЕРАЛЬНАЯ КНОПКА
+# ==========================================
+@dp.callback_query(F.data == "referral")
+async def referral_callback(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    link = await generate_referral_link(user_id)
+    referral_info = await get_referral_info(user_id)
+    
+    next_reward = ""
+    if referral_info["count"] < 1:
+        next_reward = "🎯 Пригласи 1 друга → Стандарт на месяц"
+    elif referral_info["count"] < 3:
+        next_reward = "🎯 Пригласи ещё 3 друзей → Премиум на месяц"
+    else:
+        next_reward = "🏆 Ты уже получил все награды!"
+    
+    await callback.message.edit_text(
+        "🎁 **Реферальная программа**\n\n"
+        "Отправь другу эту ссылку:\n"
+        f"`{link}`\n\n"
+        "📊 **Твоя статистика:**\n"
+        f"• Приглашено: {referral_info['count']} друзей\n"
+        f"• Стандарт: {'✅ Получен' if referral_info['standard_used'] else '❌ Не получен'}\n"
+        f"• Премиум: {'✅ Получен' if referral_info['premium_used'] else '❌ Не получен'}\n\n"
+        f"{next_reward}\n\n"
+        "💡 Нажми на ссылку, чтобы скопировать!",
+        parse_mode="Markdown"
+    )
+    await callback.answer()
 
 # ==========================================
 # КОМАНДА /ADMIN
@@ -196,6 +256,9 @@ async def main_menu_callback(callback: types.CallbackQuery):
         "👋 **Главное меню**\n\n"
         "Просто отправь мне ссылку на видео — я скачаю его без водяных знаков!\n\n"
         f"📊 Твой лимит: {FREE_DAILY_LIMIT} скачиваний в день.\n\n"
+        "🎁 **Пригласи друга — получи подписку!**\n"
+        "• 1 друг → Стандарт на месяц\n"
+        "• 3 друга → Премиум на месяц\n\n"
         "💳 Чтобы увеличить лимит — выбери тариф.",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
@@ -229,6 +292,7 @@ async def my_stats_callback(callback: types.CallbackQuery):
     stats = await get_user_stats(user_id)
     tariff = await get_user_tariff(user_id)
     tariff_info = TARIFFS.get(tariff, TARIFFS["free"])
+    referral_info = await get_referral_info(user_id)
     
     if stats:
         text = (
@@ -239,7 +303,11 @@ async def my_stats_callback(callback: types.CallbackQuery):
             f"📊 Статус: {'🟢 Активна' if stats['is_subscribed'] == 1 else '🔴 Не активна'}\n"
             f"📅 Действует до: {stats['sub_end_date'] or 'Нет'}\n\n"
             f"📱 Доступно платформ: {len(tariff_info['platforms']) if tariff_info['platforms'] != ['all'] else 'Все'}\n"
-            f"📊 Лимит в день: {tariff_info['daily_limit'] if tariff_info['daily_limit'] != 9999 else '∞'}"
+            f"📊 Лимит в день: {tariff_info['daily_limit'] if tariff_info['daily_limit'] != 9999 else '∞'}\n\n"
+            f"🎁 **Рефералы:**\n"
+            f"• Приглашено: {referral_info['count']} друзей\n"
+            f"• Награда за 1 друга: {'✅ Получен' if referral_info['standard_used'] else '❌ Не получен'}\n"
+            f"• Награда за 3 друзей: {'✅ Получен' if referral_info['premium_used'] else '❌ Не получен'}"
         )
     else:
         text = "⚠️ Не удалось получить данные."
@@ -551,7 +619,8 @@ async def handle_link(message: types.Message):
                 video=video_file, 
                 caption=f"✅ **Вот твоё видео!**\n\n"
                        f"📱 Платформа: {platform.capitalize()}\n"
-                       f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+                       f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}\n\n"
+                       f"🎁 Пригласи друга и получи подписку! /help",
                 reply_markup=get_main_keyboard()
             )
             await increment_downloads(user_id)
@@ -582,7 +651,8 @@ async def handle_unknown(message: types.Message):
     await message.answer(
         "❓ **Я не понял, что ты хочешь.**\n\n"
         "🔗 Просто отправь мне ссылку на видео из TikTok, Instagram, YouTube или Pinterest.\n"
-        "💳 Или используй кнопки ниже.",
+        "💳 Или используй кнопки ниже.\n\n"
+        "🎁 Пригласи друга — получи подписку! /help",
         reply_markup=get_main_keyboard(),
         parse_mode="Markdown"
     )
