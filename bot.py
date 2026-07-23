@@ -117,3 +117,7 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+class AdminState(StatesGroup):
+    waiting_for_broadcast_msg = State()
+    waiting_for_give_sub_id = State()
+    waiting_for_revoke_sub_id = State()
