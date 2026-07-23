@@ -10,13 +10,13 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from config import BOT_TOKEN, FREE_DAILY_LIMIT, SUB_PRICE, ADMIN_ID
+from config import BOT_TOKEN, FREE_DAILY_LIMIT, ADMIN_ID, TARIFFS, TARIFF_STARS
 from database import (
     init_db, get_or_create_user, increment_downloads, activate_subscription,
     get_admin_stats, grant_sub_by_admin, revoke_sub_by_admin, get_all_users,
-    get_user_stats
+    get_user_stats, get_user_tariff, can_download
 )
-from downloader import download_media
+from downloader import download_media, detect_platform
 
 # ==========================================
 # НАСТРОЙКА ЛОГИРОВАНИЯ
@@ -37,15 +37,28 @@ class AdminState(StatesGroup):
     waiting_for_broadcast_msg = State()
     waiting_for_give_sub_id = State()
     waiting_for_revoke_sub_id = State()
-    waiting_for_answer = State()  # ✅ НОВОЕ: для ответа пользователю
+    waiting_for_answer = State()
+    waiting_for_answer_to_user = State()
 
 # ==========================================
 # КЛАВИАТУРЫ
 # ==========================================
-def get_pay_keyboard():
+
+def get_main_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"💳 Купить Безлимит — {SUB_PRICE} ₽ / мес", callback_data="buy_sub")],
         [InlineKeyboardButton(text="📊 Моя статистика", callback_data="my_stats")],
+        [InlineKeyboardButton(text="💳 Выбрать тариф", callback_data="show_tariffs")],
+        [InlineKeyboardButton(text="📞 Связаться с админом", callback_data="contact_admin")]
+    ])
+
+def get_tariff_keyboard():
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📱 Бесплатный — 0 ₽", callback_data="tariff_free"),
+            InlineKeyboardButton(text="⚡ Стандарт — 100 ₽", callback_data="tariff_standard")
+        ],
+        [InlineKeyboardButton(text="💎 Премиум — 200 ₽", callback_data="tariff_premium")],
+        [InlineKeyboardButton(text="🏠 Назад", callback_data="main_menu")]
     ])
 
 def get_admin_keyboard():
@@ -63,15 +76,8 @@ def get_admin_keyboard():
 
 def get_user_stats_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="💳 Купить Безлимит", callback_data="buy_sub")],
+        [InlineKeyboardButton(text="💳 Выбрать тариф", callback_data="show_tariffs")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
-    ])
-
-def get_main_keyboard():
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="📊 Моя статистика", callback_data="my_stats")],
-        [InlineKeyboardButton(text="💳 Купить Безлимит", callback_data="buy_sub")],
-        [InlineKeyboardButton(text="📞 Связаться с админом", callback_data="contact_admin")]
     ])
 
 # ==========================================
@@ -84,7 +90,8 @@ async def start_cmd(message: types.Message):
         "👋 **Салют! Я качаю видео без водяных знаков** из TikTok, Reels, Shorts и Pinterest!\n\n"
         "🔗 Просто отправь мне ссылку на видео.\n"
         f"📊 Твой лимит: {FREE_DAILY_LIMIT} бесплатных скачиваний в день.\n\n"
-        "ℹ️ *Поддерживаемые платформы:* TikTok, Instagram, YouTube, Pinterest, Twitter/X, Facebook",
+        "ℹ️ *Поддерживаемые платформы:* TikTok, Instagram, YouTube, Pinterest, Twitter/X, Facebook\n\n"
+        "💡 Для большего выбери подходящий тариф!",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
@@ -94,23 +101,51 @@ async def main_menu_callback(callback: types.CallbackQuery):
     await callback.message.edit_text(
         "👋 **Главное меню**\n\n"
         "Просто отправь мне ссылку на видео — я скачаю его без водяных знаков!\n\n"
-        f"📊 Твой лимит: {FREE_DAILY_LIMIT} скачиваний в день.",
+        f"📊 Твой лимит: {FREE_DAILY_LIMIT} скачиваний в день.\n\n"
+        "💳 Чтобы увеличить лимит — выбери тариф.",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
     await callback.answer()
 
+@dp.callback_query(F.data == "show_tariffs")
+async def show_tariffs(callback: types.CallbackQuery):
+    await callback.message.edit_text(
+        "💎 **Выбери свой тариф:**\n\n"
+        "📱 **Бесплатный** — 0 ₽\n"
+        "   • 3 скачивания в день\n"
+        "   • TikTok, Instagram, Pinterest\n"
+        "   • Качество: среднее\n\n"
+        "⚡ **Стандарт** — 100 ₽/мес\n"
+        "   • 30 скачиваний в день\n"
+        "   • Все основные платформы\n"
+        "   • Качество: высокое\n\n"
+        "💎 **Премиум** — 200 ₽/мес\n"
+        "   • Безлимит скачиваний\n"
+        "   • Все платформы\n"
+        "   • Максимальное качество",
+        parse_mode="Markdown",
+        reply_markup=get_tariff_keyboard()
+    )
+    await callback.answer()
+
 @dp.callback_query(F.data == "my_stats")
 async def my_stats_callback(callback: types.CallbackQuery):
-    stats = await get_user_stats(callback.from_user.id)
+    user_id = callback.from_user.id
+    stats = await get_user_stats(user_id)
+    tariff = await get_user_tariff(user_id)
+    tariff_info = TARIFFS.get(tariff, TARIFFS["free"])
+    
     if stats:
         text = (
             "📊 **Твоя статистика:**\n\n"
             f"📥 Скачиваний сегодня: {stats['downloads_today']}\n"
             f"📅 Всего скачиваний: {stats['total_downloads']}\n"
-            f"💎 Статус: {'🟢 Активна' if stats['is_subscribed'] else '🔴 Не активна'}\n"
-            f"📅 Дата активации: {stats['sub_start'] or 'Нет'}\n"
-            f"📅 Дата окончания: {stats['sub_end'] or 'Нет'}"
+            f"💎 Тариф: **{tariff_info['name']}**\n"
+            f"📊 Статус: {'🟢 Активна' if stats['is_subscribed'] == 1 else '🔴 Не активна'}\n"
+            f"📅 Действует до: {stats['sub_end_date'] or 'Нет'}\n\n"
+            f"📱 Доступно платформ: {len(tariff_info['platforms']) if tariff_info['platforms'] != ['all'] else 'Все'}\n"
+            f"📊 Лимит в день: {tariff_info['daily_limit'] if tariff_info['daily_limit'] != 9999 else '∞'}"
         )
     else:
         text = "⚠️ Не удалось получить данные."
@@ -131,17 +166,14 @@ async def contact_admin_callback(callback: types.CallbackQuery, state: FSMContex
 async def process_user_message_to_admin(message: types.Message, state: FSMContext):
     user_id = message.from_user.id
     user_name = message.from_user.full_name or "Пользователь"
-    user_link = f"tg://user?id={user_id}"
     
     text = (
         f"💬 **Новое сообщение от пользователя**\n\n"
         f"👤 **Имя:** {user_name}\n"
-        f"🆔 **ID:** `{user_id}`\n"
-        f"🔗 [Ссылка на профиль]({user_link})\n\n"
+        f"🆔 **ID:** `{user_id}`\n\n"
         f"📝 **Текст:**\n{message.text}"
     )
     
-    # Отправляем админу
     if message.photo:
         await bot.send_photo(ADMIN_ID, message.photo[-1].file_id, caption=text, parse_mode="Markdown")
     elif message.video:
@@ -151,10 +183,7 @@ async def process_user_message_to_admin(message: types.Message, state: FSMContex
     else:
         await bot.send_message(ADMIN_ID, text, parse_mode="Markdown")
     
-    await message.answer(
-        "✅ **Твоё сообщение отправлено администратору!**\n\n"
-        "Он ответит тебе в ближайшее время."
-    )
+    await message.answer("✅ **Твоё сообщение отправлено администратору!**")
     await state.clear()
 
 @dp.message(Command("admin"))
@@ -186,29 +215,28 @@ async def process_admin_callbacks(callback: types.CallbackQuery, state: FSMConte
             "📈 **Актуальная статистика:**\n\n"
             f"👥 Всего юзеров: **{stats['total_users']}**\n"
             f"💎 Активных подписок: **{stats['active_subs']}**\n"
-            f"📥 Скачиваний сегодня: **{stats['total_downloads']}**\n"
+            f"📥 Скачиваний всего: **{stats['total_downloads']}**\n\n"
+            f"📱 Бесплатный: {stats.get('free_users', 0)}\n"
+            f"⚡ Стандарт: {stats.get('standard_users', 0)}\n"
+            f"💎 Премиум: {stats.get('premium_users', 0)}\n"
             f"🕐 Обновлено: {datetime.now().strftime('%d.%m.%Y %H:%M')}"
         )
         await callback.message.edit_text(text, reply_markup=get_admin_keyboard(), parse_mode="Markdown")
 
     elif action == "broadcast":
-        await callback.message.answer("📢 Отправь сообщение (текст, фото или видео), которое нужно разослать всем юзерам:")
+        await callback.message.answer("📢 Отправь сообщение для рассылки:")
         await state.set_state(AdminState.waiting_for_broadcast_msg)
 
     elif action == "give":
-        await callback.message.answer("🎁 Отправь ID пользователя, которому нужно выдать безлимит:")
+        await callback.message.answer("🎁 Отправь: `ID тариф`\nПример: `123456 standard` или `123456 premium`")
         await state.set_state(AdminState.waiting_for_give_sub_id)
 
     elif action == "revoke":
-        await callback.message.answer("❌ Отправь ID пользователя, у которого нужно забрать безлимит:")
+        await callback.message.answer("❌ Отправь ID пользователя:")
         await state.set_state(AdminState.waiting_for_revoke_sub_id)
 
     elif action == "answer":
-        await callback.message.answer(
-            "💬 **Ответить пользователю**\n\n"
-            "Напиши: `user_id|сообщение`\n"
-            "Например: `123456789|Привет, видео скачается через пару минут.`"
-        )
+        await callback.message.answer("💬 Напиши: `user_id|сообщение`")
         await state.set_state(AdminState.waiting_for_answer_to_user)
 
     elif action == "export":
@@ -220,35 +248,6 @@ async def process_admin_callbacks(callback: types.CallbackQuery, state: FSMConte
         await callback.message.edit_text("🔄 Действие отменено.", reply_markup=get_admin_keyboard())
         
     await callback.answer()
-
-@dp.message(AdminState.waiting_for_answer_to_user)
-async def process_answer_to_user(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        return
-    
-    text = message.text
-    if "|" not in text:
-        await message.answer("⚠️ Неправильный формат. Используй: `user_id|сообщение`")
-        return
-    
-    try:
-        user_id_str, answer_text = text.split("|", 1)
-        user_id = int(user_id_str.strip())
-        answer_text = answer_text.strip()
-        
-        if not answer_text:
-            await message.answer("❌ Текст сообщения не может быть пустым.")
-            return
-        
-        await bot.send_message(
-            user_id,
-            f"💬 **Ответ от администратора:**\n\n{answer_text}"
-        )
-        await message.answer(f"✅ Ответ отправлен пользователю `{user_id}`")
-    except ValueError:
-        await message.answer("❌ ID пользователя должен быть числом.")
-    
-    await state.clear()
 
 @dp.message(AdminState.waiting_for_broadcast_msg)
 async def process_broadcast(message: types.Message, state: FSMContext):
@@ -268,21 +267,32 @@ async def process_broadcast(message: types.Message, state: FSMContext):
         except Exception:
             pass
             
-    await message.answer(f"✅ Рассылка завершена!\nУспешно доставлено: {success_count} из {len(users)}")
+    await message.answer(f"✅ Рассылка завершена!\nУспешно: {success_count} из {len(users)}")
     await state.clear()
 
 @dp.message(AdminState.waiting_for_give_sub_id)
 async def process_give_sub(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
         return
-        
-    if not message.text.isdigit():
-        await message.answer("⚠️ ID должен состоять только из цифр. Попробуй еще раз или напиши /admin для отмены.")
+    
+    parts = message.text.split()
+    if len(parts) < 2:
+        await message.answer("⚠️ Формат: `ID тариф` (тариф: standard/premium)")
         return
+    
+    try:
+        target_id = int(parts[0])
+        tariff_key = parts[1] if len(parts) > 1 else "standard"
         
-    target_id = int(message.text)
-    await grant_sub_by_admin(target_id)
-    await message.answer(f"✅ Пользователю `{target_id}` успешно выдан безлимит!", parse_mode="Markdown")
+        if tariff_key not in ["standard", "premium"]:
+            await message.answer("⚠️ Тариф должен быть: standard или premium")
+            return
+        
+        await grant_sub_by_admin(target_id, tariff_key)
+        await message.answer(f"✅ Пользователю `{target_id}` выдан тариф `{tariff_key}`!")
+    except ValueError:
+        await message.answer("⚠️ ID должен быть числом.")
+    
     await state.clear()
 
 @dp.message(AdminState.waiting_for_revoke_sub_id)
@@ -296,7 +306,36 @@ async def process_revoke_sub(message: types.Message, state: FSMContext):
         
     target_id = int(message.text)
     await revoke_sub_by_admin(target_id)
-    await message.answer(f"❌ У пользователя `{target_id}` забрали безлимит.", parse_mode="Markdown")
+    await message.answer(f"❌ У пользователя `{target_id}` забрали подписку.", parse_mode="Markdown")
+    await state.clear()
+
+@dp.message(AdminState.waiting_for_answer_to_user)
+async def process_answer_to_user(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        return
+    
+    text = message.text
+    if "|" not in text:
+        await message.answer("⚠️ Формат: `user_id|сообщение`")
+        return
+    
+    try:
+        user_id_str, answer_text = text.split("|", 1)
+        user_id = int(user_id_str.strip())
+        answer_text = answer_text.strip()
+        
+        if not answer_text:
+            await message.answer("❌ Текст не может быть пустым.")
+            return
+        
+        await bot.send_message(
+            user_id,
+            f"💬 **Ответ от администратора:**\n\n{answer_text}"
+        )
+        await message.answer(f"✅ Ответ отправлен пользователю `{user_id}`")
+    except ValueError:
+        await message.answer("❌ ID должен быть числом.")
+    
     await state.clear()
 
 # ==========================================
@@ -328,29 +367,52 @@ async def export_database(message: types.Message):
         with open(filename, "rb") as f:
             await message.answer_document(
                 FSInputFile(filename),
-                caption=f"📦 **Экспорт базы данных**\n\nВсего пользователей: {len(users)}"
+                caption=f"📦 **Экспорт базы данных**\n\nВсего: {len(users)} пользователей"
             )
         
         os.remove(filename)
         
     except Exception as e:
-        await message.answer(f"⚠️ Ошибка при экспорте: {str(e)}")
+        await message.answer(f"⚠️ Ошибка: {str(e)}")
 
 # ==========================================
-# ОПЛАТА
+# ТАРИФЫ И ОПЛАТА
 # ==========================================
-@dp.callback_query(F.data == "buy_sub")
-async def process_buy_sub(callback: types.CallbackQuery):
-    stars_amount = int(SUB_PRICE / 2)
+@dp.callback_query(F.data.startswith("tariff_"))
+async def process_tariff_selection(callback: types.CallbackQuery):
+    tariff_key = callback.data.replace("tariff_", "")
+    
+    if tariff_key == "free":
+        await callback.message.edit_text(
+            "📱 **Бесплатный тариф активен!**\n\n"
+            "Ты можешь скачивать:\n"
+            "• 3 видео в день\n"
+            "• TikTok, Instagram, Pinterest\n\n"
+            "Чтобы сменить тариф — используй кнопку ниже.",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
+        )
+        await callback.answer("✅ Бесплатный тариф")
+        return
+    
+    tariff = TARIFFS.get(tariff_key)
+    if not tariff:
+        await callback.answer("❌ Тариф не найден")
+        return
+    
+    price = tariff["price"]
+    stars_amount = int(price / 2)
     
     await bot.send_invoice(
         chat_id=callback.from_user.id,
-        title="Безлимитная подписка",
-        description="Скачивание любых видео без ограничений и лимитов на 30 дней.",
-        payload="sub_monthly_payload",
+        title=f"Подписка «{tariff['name']}»",
+        description=f"Тариф {tariff['name']} на 30 дней.\n"
+                    f"Лимит: {tariff['daily_limit']} скачиваний/день\n"
+                    f"Платформы: {', '.join(tariff['platforms']) if tariff['platforms'] != ['all'] else 'Все'}",
+        payload=f"sub_{tariff_key}_payload",
         provider_token="",
         currency="XTR",
-        prices=[LabeledPrice(label="Подписка на 1 месяц", amount=stars_amount)]
+        prices=[LabeledPrice(label=f"Подписка {tariff['name']} на месяц", amount=stars_amount)]
     )
     await callback.answer()
 
@@ -360,26 +422,40 @@ async def process_pre_checkout(pre_checkout_query: PreCheckoutQuery):
 
 @dp.message(F.successful_payment)
 async def process_successful_payment(message: types.Message):
-    await activate_subscription(message.from_user.id)
+    payload = message.successful_payment.invoice_payload
+    tariff_key = payload.replace("sub_", "").replace("_payload", "")
+    
+    if tariff_key not in ["standard", "premium"]:
+        tariff_key = "standard"
+    
+    await activate_subscription(message.from_user.id, tariff_key)
+    tariff = TARIFFS.get(tariff_key, TARIFFS["standard"])
+    
     await message.answer(
-        "🎉 **Оплата прошла успешно!**\n\n"
-        "Подписка активирована. Теперь у тебя безлимитный доступ!"
+        f"🎉 **Оплата прошла успешно!**\n\n"
+        f"Тариф «{tariff['name']}» активирован на 30 дней!\n"
+        f"📊 Лимит: {tariff['daily_limit']} скачиваний/день\n"
+        f"📱 Платформы: {', '.join(tariff['platforms']) if tariff['platforms'] != ['all'] else 'Все'}",
+        parse_mode="Markdown"
     )
 
 # ==========================================
-# ОСНОВНОЙ ОБРАБОТЧИК ССЫЛОК
+# ОСНОВНОЙ ОБРАБОТЧИК ССЫЛОК (С ПРОВЕРКОЙ ТАРИФА)
 # ==========================================
 @dp.message(F.text.startswith(("http://", "https://")))
 async def handle_link(message: types.Message):
     user_id = message.from_user.id
-    user = await get_or_create_user(user_id)
-
-    if not user["is_subscribed"] and user["downloads_today"] >= FREE_DAILY_LIMIT:
+    await get_or_create_user(user_id)
+    
+    platform = detect_platform(message.text)
+    
+    # Проверяем, может ли пользователь скачать
+    can_dl, error_msg = await can_download(user_id, platform)
+    if not can_dl:
         await message.answer(
-            f"❌ **Лимит на сегодня исчерпан ({FREE_DAILY_LIMIT}/{FREE_DAILY_LIMIT}).**\n\n"
-            "Приходи завтра или включи безлимит всего за 100 рублей!",
-            reply_markup=get_pay_keyboard(),
-            parse_mode="Markdown"
+            error_msg + "\n\n💳 Используй /tariff или кнопку ниже для смены тарифа.",
+            parse_mode="Markdown",
+            reply_markup=get_main_keyboard()
         )
         return
 
@@ -393,13 +469,12 @@ async def handle_link(message: types.Message):
             video_file = FSInputFile(file_path)
             await message.answer_video(
                 video=video_file, 
-                caption="✅ **Вот твоё видео без водяных знаков!**\n\n"
-                       "🎬 Скачано через бота\n"
-                       "📅 " + datetime.now().strftime("%d.%m.%Y %H:%M"),
+                caption=f"✅ **Вот твоё видео!**\n\n"
+                       f"📱 Платформа: {platform.capitalize()}\n"
+                       f"📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}",
                 reply_markup=get_main_keyboard()
             )
-            if not user["is_subscribed"]:
-                await increment_downloads(user_id)
+            await increment_downloads(user_id)
         else:
             await message.answer(
                 "⚠️ **Не удалось скачать видео.**\n\n"
