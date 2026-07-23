@@ -81,7 +81,81 @@ def get_user_stats_keyboard():
     ])
 
 # ==========================================
-# КОМАНДЫ
+# 🔥 КОМАНДА /TARIFF
+# ==========================================
+@dp.message(Command("tariff"))
+async def cmd_tariff(message: types.Message):
+    await message.answer(
+        "💎 **Выбери свой тариф:**\n\n"
+        "📱 **Бесплатный** — 0 ₽\n"
+        "   • 3 скачивания в день\n"
+        "   • TikTok, Instagram, Pinterest\n"
+        "   • Качество: среднее\n\n"
+        "⚡ **Стандарт** — 100 ₽/мес\n"
+        "   • 30 скачиваний в день\n"
+        "   • Все основные платформы\n"
+        "   • Качество: высокое\n\n"
+        "💎 **Премиум** — 200 ₽/мес\n"
+        "   • Безлимит скачиваний\n"
+        "   • Все платформы\n"
+        "   • Максимальное качество",
+        parse_mode="Markdown",
+        reply_markup=get_tariff_keyboard()
+    )
+
+# ==========================================
+# 🔥 КОМАНДА /STATS
+# ==========================================
+@dp.message(Command("stats"))
+async def cmd_stats(message: types.Message):
+    user_id = message.from_user.id
+    stats = await get_user_stats(user_id)
+    tariff = await get_user_tariff(user_id)
+    tariff_info = TARIFFS.get(tariff, TARIFFS["free"])
+    
+    if stats:
+        text = (
+            "📊 **Твоя статистика:**\n\n"
+            f"📥 Скачиваний сегодня: {stats['downloads_today']}\n"
+            f"📅 Всего скачиваний: {stats['total_downloads']}\n"
+            f"💎 Тариф: **{tariff_info['name']}**\n"
+            f"📊 Статус: {'🟢 Активна' if stats['is_subscribed'] == 1 else '🔴 Не активна'}\n"
+            f"📅 Действует до: {stats['sub_end_date'] or 'Нет'}\n\n"
+            f"📱 Доступно платформ: {len(tariff_info['platforms']) if tariff_info['platforms'] != ['all'] else 'Все'}\n"
+            f"📊 Лимит в день: {tariff_info['daily_limit'] if tariff_info['daily_limit'] != 9999 else '∞'}"
+        )
+    else:
+        text = "⚠️ Не удалось получить данные."
+    
+    await message.answer(text, parse_mode="Markdown", reply_markup=get_user_stats_keyboard())
+
+# ==========================================
+# 🔥 КОМАНДА /HELP
+# ==========================================
+@dp.message(Command("help"))
+async def cmd_help(message: types.Message):
+    await message.answer(
+        "📜 **Команды бота:**\n\n"
+        "/start — Главное меню\n"
+        "/tariff — Выбрать тариф\n"
+        "/stats — Моя статистика\n"
+        "/admin — Панель управления (админ)\n"
+        "/help — Эта справка\n\n"
+        "🔗 Просто отправь ссылку на видео — я скачаю его!\n\n"
+        "📱 Поддерживаемые платформы:\n"
+        "• TikTok\n"
+        "• Instagram (Reels, видео)\n"
+        "• YouTube (Shorts, видео)\n"
+        "• Pinterest\n"
+        "• Twitter/X\n"
+        "• Facebook\n"
+        "• Reddit\n"
+        "• Vimeo",
+        parse_mode="Markdown"
+    )
+
+# ==========================================
+# КОМАНДА /START
 # ==========================================
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
@@ -95,6 +169,26 @@ async def start_cmd(message: types.Message):
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
+
+# ==========================================
+# КОМАНДА /ADMIN
+# ==========================================
+@dp.message(Command("admin"))
+async def admin_panel(message: types.Message, state: FSMContext):
+    if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ У тебя нет прав для выполнения этой команды.")
+        return
+    
+    await state.clear()
+    await message.answer(
+        "👑 **Панель управления создателя**\n\nВыбери нужное действие:",
+        reply_markup=get_admin_keyboard(),
+        parse_mode="Markdown"
+    )
+
+# ==========================================
+# ОБРАБОТЧИКИ CALLBACK (КНОПКИ)
+# ==========================================
 
 @dp.callback_query(F.data == "main_menu")
 async def main_menu_callback(callback: types.CallbackQuery):
@@ -185,19 +279,6 @@ async def process_user_message_to_admin(message: types.Message, state: FSMContex
     
     await message.answer("✅ **Твоё сообщение отправлено администратору!**")
     await state.clear()
-
-@dp.message(Command("admin"))
-async def admin_panel(message: types.Message, state: FSMContext):
-    if message.from_user.id != ADMIN_ID:
-        await message.answer("⛔ У тебя нет прав для выполнения этой команды.")
-        return
-    
-    await state.clear()
-    await message.answer(
-        "👑 **Панель управления создателя**\n\nВыбери нужное действие:",
-        reply_markup=get_admin_keyboard(),
-        parse_mode="Markdown"
-    )
 
 # ==========================================
 # АДМИН-ОБРАБОТЧИКИ
@@ -440,7 +521,7 @@ async def process_successful_payment(message: types.Message):
     )
 
 # ==========================================
-# ОСНОВНОЙ ОБРАБОТЧИК ССЫЛОК (С ПРОВЕРКОЙ ТАРИФА)
+# ОСНОВНОЙ ОБРАБОТЧИК ССЫЛОК
 # ==========================================
 @dp.message(F.text.startswith(("http://", "https://")))
 async def handle_link(message: types.Message):
@@ -449,7 +530,6 @@ async def handle_link(message: types.Message):
     
     platform = detect_platform(message.text)
     
-    # Проверяем, может ли пользователь скачать
     can_dl, error_msg = await can_download(user_id, platform)
     if not can_dl:
         await message.answer(
@@ -483,7 +563,7 @@ async def handle_link(message: types.Message):
                 "• TikTok\n"
                 "• Instagram (Reels, видео)\n"
                 "• YouTube (Shorts, видео)\n"
-                "• Pinterest (видео)\n"
+                "• Pinterest\n"
                 "• Twitter/X\n"
                 "• Facebook",
                 reply_markup=get_main_keyboard(),
