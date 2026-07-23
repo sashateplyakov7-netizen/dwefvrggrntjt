@@ -63,3 +63,8 @@ DEFAULT_TARIFF = "free"
 SUB_DURATION_DAYS = 30  # Длительность подписки в днях
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 МБ для yt-dlp
 SUPPORTED_PLATFORMS = ["tiktok", "instagram", "youtube", "pinterest", "twitter", "facebook", "reddit", "vimeo"]
+
+# ==========================================
+# 🔥 ИМЯ БОТА ДЛЯ РЕФЕРАЛЬНЫХ ССЫЛОК
+# ==========================================
+BOT_USERNAME = "Dowlander_Dowo_Bot"  # БЕЗ @, например: "download_video_bot"
