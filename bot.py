@@ -104,6 +104,7 @@ async def start_dummy_server():
     print(f"Заглушка порта запущена на порту {port}")
 async def main():
     await init_db()
+    await start_dummy_server()  # <--- Запускаем слушатель порта для Render
     print("Бот успешно запущен!")
     await dp.start_polling(bot)
 
