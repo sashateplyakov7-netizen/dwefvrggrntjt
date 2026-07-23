@@ -4,23 +4,7 @@ import re
 import yt_dlp
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
-
-# ==========================================
-# СПИСОК ПОДДЕРЖИВАЕМЫХ ПЛАТФОРМ
-# ==========================================
-SUPPORTED_PLATFORMS = [
-    "tiktok.com",
-    "instagram.com",
-    "youtube.com",
-    "youtu.be",
-    "pinterest.com",
-    "twitter.com",
-    "x.com",
-    "facebook.com",
-    "reddit.com",
-    "vimeo.com",
-    "t.me"
-]
+from config import MAX_FILE_SIZE, SUPPORTED_PLATFORMS
 
 # ==========================================
 # ОПРЕДЕЛЕНИЕ ПЛАТФОРМЫ ПО ССЫЛКЕ
@@ -44,7 +28,7 @@ def _sync_download(url: str, output_path: str) -> bool:
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
-        'max_filesize': 50 * 1024 * 1024,  # Лимит 50 МБ
+        'max_filesize': MAX_FILE_SIZE,
         'concurrent_fragment_downloads': 5,
         'socket_timeout': 10,
     }
@@ -53,7 +37,7 @@ def _sync_download(url: str, output_path: str) -> bool:
     if platform == "tiktok.com":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'cookiesfrombrowser': ('chrome',),  # Пытается взять куки из браузера
+            'cookiesfrombrowser': ('chrome',),
         })
     
     elif platform in ["instagram.com", "facebook.com"]:
@@ -91,9 +75,9 @@ def _sync_download(url: str, output_path: str) -> bool:
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
         })
     
-    # 🔥 ДОБАВЛЯЕМ УНИВЕРСАЛЬНЫЕ ОПЦИИ ДЛЯ ВСЕХ
+    # 🔥 УНИВЕРСАЛЬНЫЕ ОПЦИИ
     ydl_opts.update({
-        'retries': 10,  # Количество попыток при ошибке
+        'retries': 10,
         'fragment_retries': 10,
         'skip_unavailable_fragments': True,
         'ignoreerrors': True,
@@ -113,12 +97,11 @@ def _sync_download(url: str, output_path: str) -> bool:
             print(f"✅ Загрузка завершена! Размер: {file_size:.2f} МБ", flush=True)
             return True
         else:
-            print(f"❌ Файл не найден после загрузки: {output_path}", flush=True)
+            print(f"❌ Файл не найден: {output_path}", flush=True)
             return False
             
     except yt_dlp.utils.DownloadError as e:
         print(f"❌ Ошибка yt-dlp: {e}", flush=True)
-        # Пробуем альтернативный формат
         try:
             print("🔄 Пробуем альтернативный формат...", flush=True)
             fallback_opts = ydl_opts.copy()
@@ -127,7 +110,7 @@ def _sync_download(url: str, output_path: str) -> bool:
                 ydl.download([url])
             return os.path.exists(output_path)
         except Exception as e2:
-            print(f"❌ Альтернативная загрузка тоже не удалась: {e2}", flush=True)
+            print(f"❌ Альтернативная загрузка не удалась: {e2}", flush=True)
             return False
             
     except Exception as e:
@@ -140,16 +123,11 @@ def _sync_download(url: str, output_path: str) -> bool:
 async def download_media(url: str, output_path: str) -> bool:
     """
     Асинхронная загрузка медиа с поддержкой множества платформ.
-    
-    Поддерживаемые платформы:
-    - TikTok, Instagram, YouTube, Pinterest
-    - Twitter/X, Facebook, Reddit, Vimeo
-    - Telegram (при наличии куки)
     """
     return await asyncio.to_thread(_sync_download, url, output_path)
 
 # ==========================================
-# 🔥 НОВАЯ ФУНКЦИЯ: ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО
+# ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО
 # ==========================================
 def extract_video_info(url: str) -> dict:
     """
@@ -190,7 +168,7 @@ def extract_video_info(url: str) -> dict:
         }
 
 # ==========================================
-# 🔥 НОВАЯ ФУНКЦИЯ: ЗАГРУЗКА С ПРОГРЕССОМ
+# ЗАГРУЗКА С ПРОГРЕССОМ
 # ==========================================
 async def download_media_with_progress(url: str, output_path: str, progress_callback) -> bool:
     """
@@ -204,7 +182,7 @@ async def download_media_with_progress(url: str, output_path: str, progress_call
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'max_filesize': 50 * 1024 * 1024,
+            'max_filesize': MAX_FILE_SIZE,
             'concurrent_fragment_downloads': 5,
             'socket_timeout': 10,
             'retries': 10,
@@ -227,7 +205,7 @@ async def download_media_with_progress(url: str, output_path: str, progress_call
     return await asyncio.to_thread(_sync_with_progress)
 
 # ==========================================
-# 🔥 НОВАЯ ФУНКЦИЯ: ПРОВЕРКА ВАЛИДНОСТИ ССЫЛКИ
+# ПРОВЕРКА ВАЛИДНОСТИ ССЫЛКИ
 # ==========================================
 async def is_valid_url(url: str) -> bool:
     """
@@ -240,7 +218,7 @@ async def is_valid_url(url: str) -> bool:
         return False
 
 # ==========================================
-# 🔥 НОВАЯ ФУНКЦИЯ: БЫСТРАЯ ЗАГРУЗКА (ПОЛУЧАЕТ ЛУЧШЕЕ КАЧЕСТВО)
+# ЗАГРУЗКА В ВЫСОКОМ КАЧЕСТВЕ
 # ==========================================
 async def download_media_hq(url: str, output_path: str) -> bool:
     """
@@ -253,7 +231,7 @@ async def download_media_hq(url: str, output_path: str) -> bool:
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'max_filesize': 100 * 1024 * 1024,  # 100 МБ для HQ
+            'max_filesize': 100 * 1024 * 1024,
             'concurrent_fragment_downloads': 5,
             'socket_timeout': 10,
             'retries': 10,
@@ -272,7 +250,7 @@ async def download_media_hq(url: str, output_path: str) -> bool:
     return await asyncio.to_thread(_sync_hq)
 
 # ==========================================
-# 🔥 НОВАЯ ФУНКЦИЯ: ЗАГРУЗКА ТОЛЬКО АУДИО
+# ЗАГРУЗКА ТОЛЬКО АУДИО
 # ==========================================
 async def download_audio(url: str, output_path: str) -> bool:
     """
