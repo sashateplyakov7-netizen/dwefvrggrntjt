@@ -1,15 +1,18 @@
-from aiohttp import web
 import os
 import asyncio
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, LabeledPrice, PreCheckoutQuery
+from aiogram.client.session.aiohttp import AiohttpSession  # <-- Добавили сессию
 
 from config import BOT_TOKEN, FREE_DAILY_LIMIT, SUB_PRICE
 from database import init_db, get_or_create_user, increment_downloads, activate_subscription
 from downloader import download_media
 
-bot = Bot(token=BOT_TOKEN)
+# Настраиваем сессию с увеличенным таймаутом (5 минут = 300 секунд)
+session = AiohttpSession(timeout=300)
+bot = Bot(token=BOT_TOKEN, session=session)
 dp = Dispatcher()
 
 # Кнопка для оплаты
@@ -79,7 +82,7 @@ async def handle_link(message: types.Message):
             video_file = FSInputFile(file_path)
             await message.answer_video(
                 video=video_file, 
-                caption="✅ Вот твое видео без водяных знаков!\n\n🤖 Скачано через @ТвойБотНазвание"
+                caption="✅ Вот твое видео без водяных знаков!\n\n🤖 Скачано через бота"
             )
             if not user["is_subscribed"]:
                 await increment_downloads(user_id)
@@ -89,6 +92,7 @@ async def handle_link(message: types.Message):
         await status_msg.delete()
         if os.path.exists(file_path):
             os.remove(file_path) # Очищаем временный файл
+
 async def handle_healthcheck(request):
     return web.Response(text="Bot is alive!")
 
@@ -102,6 +106,7 @@ async def start_dummy_server():
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     print(f"Заглушка порта запущена на порту {port}")
+
 async def main():
     await init_db()
     await start_dummy_server()  # <--- Запускаем слушатель порта для Render
