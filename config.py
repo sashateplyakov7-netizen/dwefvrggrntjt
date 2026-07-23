@@ -6,7 +6,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 FREE_DAILY_LIMIT = 3
 SUB_PRICE = 100
-
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))  # <-- Добавь эту строчку
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # --- ПРОВЕРКА ЛОГИНА ---
@@ -17,9 +17,3 @@ if DATABASE_URL:
     except Exception:
         pass
 import os
-
-BOT_TOKEN = os.getenv("BOT_TOKEN")
-DATABASE_URL = os.getenv("DATABASE_URL")
-FREE_DAILY_LIMIT = int(os.getenv("FREE_DAILY_LIMIT", 3))
-SUB_PRICE = int(os.getenv("SUB_PRICE", 100))
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))  # <-- Добавь эту строчку
