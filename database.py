@@ -1,7 +1,7 @@
 from datetime import timedelta
 import asyncpg
 from datetime import datetime
-from config import DATABASE_URL
+from config import DATABASE_URL, TARIFFS
 
 # Глобальный пул соединений
 pool = None
@@ -36,6 +36,7 @@ async def init_db():
                     downloads_today INT DEFAULT 0,
                     total_downloads INT DEFAULT 0,
                     last_download_date VARCHAR(10),
+                    tariff VARCHAR(20) DEFAULT 'free',
                     is_subscribed INT DEFAULT 0,
                     sub_start_date VARCHAR(20),
                     sub_end_date VARCHAR(20),
@@ -59,18 +60,19 @@ async def get_or_create_user(user_id: int):
     
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT downloads_today, total_downloads, last_download_date, is_subscribed, sub_start_date, sub_end_date FROM users WHERE user_id = $1", 
+            "SELECT downloads_today, total_downloads, last_download_date, tariff, is_subscribed, sub_start_date, sub_end_date FROM users WHERE user_id = $1", 
             user_id
         )
         
         if not row:
             await conn.execute(
-                "INSERT INTO users (user_id, downloads_today, total_downloads, last_download_date, is_subscribed, created_at, last_activity) VALUES ($1, 0, 0, $2, 0, $3, $3)",
+                "INSERT INTO users (user_id, downloads_today, total_downloads, last_download_date, tariff, is_subscribed, created_at, last_activity) VALUES ($1, 0, 0, $2, 'free', 0, $3, $3)",
                 user_id, today, now
             )
             return {
                 "downloads_today": 0,
                 "total_downloads": 0,
+                "tariff": "free",
                 "is_subscribed": 0,
                 "sub_start_date": None,
                 "sub_end_date": None
@@ -79,6 +81,7 @@ async def get_or_create_user(user_id: int):
         downloads_today = row["downloads_today"]
         total_downloads = row["total_downloads"]
         last_date = row["last_download_date"]
+        tariff = row["tariff"] or "free"
         is_subscribed = row["is_subscribed"]
         sub_start_date = row["sub_start_date"]
         sub_end_date = row["sub_end_date"]
@@ -87,8 +90,9 @@ async def get_or_create_user(user_id: int):
         if is_subscribed == 1 and sub_end_date:
             if datetime.now() > datetime.strptime(sub_end_date, "%Y-%m-%d %H:%M:%S"):
                 is_subscribed = 0
+                tariff = "free"
                 await conn.execute(
-                    "UPDATE users SET is_subscribed = 0 WHERE user_id = $1",
+                    "UPDATE users SET is_subscribed = 0, tariff = 'free' WHERE user_id = $1",
                     user_id
                 )
         
@@ -103,6 +107,7 @@ async def get_or_create_user(user_id: int):
         return {
             "downloads_today": downloads_today,
             "total_downloads": total_downloads,
+            "tariff": tariff,
             "is_subscribed": is_subscribed,
             "sub_start_date": sub_start_date,
             "sub_end_date": sub_end_date
@@ -114,24 +119,24 @@ async def increment_downloads(user_id: int):
     
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE users SET downloads_today = downloads_today + 1, total_downloads = total_downloads + 1, last_activity = $1 WHERE user_id = $2",
-            now, user_id
+            "UPDATE users SET downloads_today = downloads_today + 1, total_downloads = total_downloads + 1, last_download_date = $1, last_activity = $2 WHERE user_id = $3",
+            today, now, user_id
         )
 
-async def activate_subscription(user_id: int):
+async def activate_subscription(user_id: int, tariff_key: str = "standard"):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
     
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE users SET is_subscribed = 1, sub_start_date = $1, sub_end_date = $2 WHERE user_id = $3",
-            now, end_date, user_id
+            "UPDATE users SET is_subscribed = 1, tariff = $1, sub_start_date = $2, sub_end_date = $3 WHERE user_id = $4",
+            tariff_key, now, end_date, user_id
         )
 
 async def get_user_stats(user_id: int):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT downloads_today, total_downloads, is_subscribed, sub_start_date, sub_end_date FROM users WHERE user_id = $1",
+            "SELECT downloads_today, total_downloads, tariff, is_subscribed, sub_start_date, sub_end_date FROM users WHERE user_id = $1",
             user_id
         )
         
@@ -141,10 +146,55 @@ async def get_user_stats(user_id: int):
         return {
             "downloads_today": row["downloads_today"],
             "total_downloads": row["total_downloads"],
+            "tariff": row["tariff"] or "free",
             "is_subscribed": row["is_subscribed"],
             "sub_start_date": row["sub_start_date"],
             "sub_end_date": row["sub_end_date"]
         }
+
+async def get_user_tariff(user_id: int) -> str:
+    """Возвращает текущий тариф пользователя"""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT tariff, is_subscribed, sub_end_date FROM users WHERE user_id = $1",
+            user_id
+        )
+        if not row:
+            return "free"
+        
+        # Проверяем, не истекла ли подписка
+        if row["is_subscribed"] == 1 and row["sub_end_date"]:
+            if datetime.now() > datetime.strptime(row["sub_end_date"], "%Y-%m-%d %H:%M:%S"):
+                await conn.execute(
+                    "UPDATE users SET is_subscribed = 0, tariff = 'free' WHERE user_id = $1",
+                    user_id
+                )
+                return "free"
+        
+        return row["tariff"] if row["is_subscribed"] == 1 else "free"
+
+async def can_download(user_id: int, platform: str) -> tuple[bool, str]:
+    """
+    Проверяет, может ли пользователь скачать видео с указанной платформы.
+    Возвращает: (можно_скачать, сообщение_об_ошибке)
+    """
+    tariff_key = await get_user_tariff(user_id)
+    tariff = TARIFFS.get(tariff_key, TARIFFS["free"])
+    
+    # Проверка платформы
+    allowed_platforms = tariff.get("platforms", [])
+    if allowed_platforms != ["all"] and platform not in allowed_platforms:
+        return False, f"❌ Тариф «{tariff['name']}» не поддерживает {platform}.\n\n💡 Используй /tariff для смены тарифа."
+    
+    # Проверка лимита
+    if tariff["daily_limit"] == 9999:  # Безлимит
+        return True, ""
+    
+    user = await get_or_create_user(user_id)
+    if user["downloads_today"] >= tariff["daily_limit"]:
+        return False, f"❌ Лимит исчерпан ({tariff['daily_limit']}/{tariff['daily_limit']}).\n\n💡 Используй /tariff для смены тарифа."
+    
+    return True, ""
 
 # ==========================================
 # АДМИН-ФУНКЦИИ
@@ -156,10 +206,18 @@ async def get_admin_stats():
         active_subs = await conn.fetchval("SELECT COUNT(*) FROM users WHERE is_subscribed = 1")
         total_downloads = await conn.fetchval("SELECT COALESCE(SUM(total_downloads), 0) FROM users")
         
+        # Статистика по тарифам
+        free_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE tariff = 'free' OR is_subscribed = 0")
+        standard_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE tariff = 'standard' AND is_subscribed = 1")
+        premium_users = await conn.fetchval("SELECT COUNT(*) FROM users WHERE tariff = 'premium' AND is_subscribed = 1")
+        
         return {
             "total_users": total_users,
             "active_subs": active_subs,
-            "total_downloads": total_downloads
+            "total_downloads": total_downloads,
+            "free_users": free_users,
+            "standard_users": standard_users,
+            "premium_users": premium_users
         }
 
 async def get_all_users():
@@ -170,13 +228,14 @@ async def get_all_users():
 async def get_all_users_with_stats():
     async with pool.acquire() as conn:
         records = await conn.fetch(
-            "SELECT user_id, downloads_today, total_downloads, is_subscribed, sub_end_date, last_activity FROM users ORDER BY total_downloads DESC"
+            "SELECT user_id, downloads_today, total_downloads, tariff, is_subscribed, sub_end_date, last_activity FROM users ORDER BY total_downloads DESC"
         )
         return [
             {
                 "user_id": r["user_id"],
                 "downloads_today": r["downloads_today"],
                 "total_downloads": r["total_downloads"],
+                "tariff": r["tariff"] or "free",
                 "is_subscribed": r["is_subscribed"],
                 "sub_end_date": r["sub_end_date"],
                 "last_activity": r["last_activity"]
@@ -184,20 +243,20 @@ async def get_all_users_with_stats():
             for r in records
         ]
 
-async def grant_sub_by_admin(user_id: int):
+async def grant_sub_by_admin(user_id: int, tariff_key: str = "standard"):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
     
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE users SET is_subscribed = 1, sub_start_date = $1, sub_end_date = $2 WHERE user_id = $3",
-            now, end_date, user_id
+            "UPDATE users SET is_subscribed = 1, tariff = $1, sub_start_date = $2, sub_end_date = $3 WHERE user_id = $4",
+            tariff_key, now, end_date, user_id
         )
 
 async def revoke_sub_by_admin(user_id: int):
     async with pool.acquire() as conn:
         await conn.execute(
-            "UPDATE users SET is_subscribed = 0, sub_start_date = NULL, sub_end_date = NULL WHERE user_id = $1",
+            "UPDATE users SET is_subscribed = 0, tariff = 'free', sub_start_date = NULL, sub_end_date = NULL WHERE user_id = $1",
             user_id
         )
 
@@ -223,7 +282,7 @@ async def cleanup_inactive_users():
 async def search_users_by_id(user_id: int):
     async with pool.acquire() as conn:
         record = await conn.fetchrow(
-            "SELECT user_id, downloads_today, total_downloads, is_subscribed, sub_end_date, last_activity FROM users WHERE user_id = $1",
+            "SELECT user_id, downloads_today, total_downloads, tariff, is_subscribed, sub_end_date, last_activity FROM users WHERE user_id = $1",
             user_id
         )
         
@@ -234,7 +293,16 @@ async def search_users_by_id(user_id: int):
             "user_id": record["user_id"],
             "downloads_today": record["downloads_today"],
             "total_downloads": record["total_downloads"],
+            "tariff": record["tariff"] or "free",
             "is_subscribed": record["is_subscribed"],
             "sub_end_date": record["sub_end_date"],
             "last_activity": record["last_activity"]
         }
+
+async def update_user_tariff(user_id: int, tariff_key: str):
+    """Обновляет тариф пользователя (без изменения подписки)"""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET tariff = $1 WHERE user_id = $2",
+            tariff_key, user_id
+        )
