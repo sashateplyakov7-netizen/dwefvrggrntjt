@@ -1,3 +1,4 @@
+from aiohttp import web
 import os
 import asyncio
 from aiogram import Bot, Dispatcher, F, types
@@ -88,7 +89,19 @@ async def handle_link(message: types.Message):
         await status_msg.delete()
         if os.path.exists(file_path):
             os.remove(file_path) # Очищаем временный файл
+async def handle_healthcheck(request):
+    return web.Response(text="Bot is alive!")
 
+async def start_dummy_server():
+    app = web.Application()
+    app.router.add_get("/", handle_healthcheck)
+    runner = web.AppRunner(app)
+    await runner.setup()
+    # Render сам передает номер порта в переменную окружения PORT
+    port = int(os.getenv("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"Заглушка порта запущена на порту {port}")
 async def main():
     await init_db()
     print("Бот успешно запущен!")
