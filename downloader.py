@@ -1,4 +1,3 @@
-Python
 import asyncio
 import os
 import yt_dlp
