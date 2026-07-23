@@ -1,3 +1,5 @@
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 import os
 import asyncio
 from aiohttp import web
