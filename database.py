@@ -1,7 +1,7 @@
 from datetime import timedelta
 import asyncpg
 from datetime import datetime
-from config import DATABASE_URL, TARIFFS
+from config import DATABASE_URL, TARIFFS, SUB_DURATION_DAYS, DEFAULT_TARIFF
 
 # Глобальный пул соединений
 pool = None
@@ -66,13 +66,13 @@ async def get_or_create_user(user_id: int):
         
         if not row:
             await conn.execute(
-                "INSERT INTO users (user_id, downloads_today, total_downloads, last_download_date, tariff, is_subscribed, created_at, last_activity) VALUES ($1, 0, 0, $2, 'free', 0, $3, $3)",
-                user_id, today, now
+                "INSERT INTO users (user_id, downloads_today, total_downloads, last_download_date, tariff, is_subscribed, created_at, last_activity) VALUES ($1, 0, 0, $2, $3, 0, $4, $4)",
+                user_id, today, DEFAULT_TARIFF, now
             )
             return {
                 "downloads_today": 0,
                 "total_downloads": 0,
-                "tariff": "free",
+                "tariff": DEFAULT_TARIFF,
                 "is_subscribed": 0,
                 "sub_start_date": None,
                 "sub_end_date": None
@@ -81,19 +81,28 @@ async def get_or_create_user(user_id: int):
         downloads_today = row["downloads_today"]
         total_downloads = row["total_downloads"]
         last_date = row["last_download_date"]
-        tariff = row["tariff"] or "free"
+        tariff = row["tariff"] or DEFAULT_TARIFF
         is_subscribed = row["is_subscribed"]
         sub_start_date = row["sub_start_date"]
         sub_end_date = row["sub_end_date"]
         
         # Проверяем, не истекла ли подписка
         if is_subscribed == 1 and sub_end_date:
-            if datetime.now() > datetime.strptime(sub_end_date, "%Y-%m-%d %H:%M:%S"):
+            try:
+                if datetime.now() > datetime.strptime(sub_end_date, "%Y-%m-%d %H:%M:%S"):
+                    is_subscribed = 0
+                    tariff = DEFAULT_TARIFF
+                    await conn.execute(
+                        "UPDATE users SET is_subscribed = 0, tariff = $1 WHERE user_id = $2",
+                        DEFAULT_TARIFF, user_id
+                    )
+            except ValueError:
+                # Если дата в неправильном формате, сбрасываем подписку
                 is_subscribed = 0
-                tariff = "free"
+                tariff = DEFAULT_TARIFF
                 await conn.execute(
-                    "UPDATE users SET is_subscribed = 0, tariff = 'free' WHERE user_id = $1",
-                    user_id
+                    "UPDATE users SET is_subscribed = 0, tariff = $1 WHERE user_id = $2",
+                    DEFAULT_TARIFF, user_id
                 )
         
         # Новый день — сбрасываем счетчик
@@ -125,7 +134,7 @@ async def increment_downloads(user_id: int):
 
 async def activate_subscription(user_id: int, tariff_key: str = "standard"):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+    end_date = (datetime.now() + timedelta(days=SUB_DURATION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
     
     async with pool.acquire() as conn:
         await conn.execute(
@@ -146,7 +155,7 @@ async def get_user_stats(user_id: int):
         return {
             "downloads_today": row["downloads_today"],
             "total_downloads": row["total_downloads"],
-            "tariff": row["tariff"] or "free",
+            "tariff": row["tariff"] or DEFAULT_TARIFF,
             "is_subscribed": row["is_subscribed"],
             "sub_start_date": row["sub_start_date"],
             "sub_end_date": row["sub_end_date"]
@@ -160,18 +169,25 @@ async def get_user_tariff(user_id: int) -> str:
             user_id
         )
         if not row:
-            return "free"
+            return DEFAULT_TARIFF
         
         # Проверяем, не истекла ли подписка
         if row["is_subscribed"] == 1 and row["sub_end_date"]:
-            if datetime.now() > datetime.strptime(row["sub_end_date"], "%Y-%m-%d %H:%M:%S"):
+            try:
+                if datetime.now() > datetime.strptime(row["sub_end_date"], "%Y-%m-%d %H:%M:%S"):
+                    await conn.execute(
+                        "UPDATE users SET is_subscribed = 0, tariff = $1 WHERE user_id = $2",
+                        DEFAULT_TARIFF, user_id
+                    )
+                    return DEFAULT_TARIFF
+            except ValueError:
                 await conn.execute(
-                    "UPDATE users SET is_subscribed = 0, tariff = 'free' WHERE user_id = $1",
-                    user_id
+                    "UPDATE users SET is_subscribed = 0, tariff = $1 WHERE user_id = $2",
+                    DEFAULT_TARIFF, user_id
                 )
-                return "free"
+                return DEFAULT_TARIFF
         
-        return row["tariff"] if row["is_subscribed"] == 1 else "free"
+        return row["tariff"] if row["is_subscribed"] == 1 else DEFAULT_TARIFF
 
 async def can_download(user_id: int, platform: str) -> tuple[bool, str]:
     """
@@ -179,12 +195,15 @@ async def can_download(user_id: int, platform: str) -> tuple[bool, str]:
     Возвращает: (можно_скачать, сообщение_об_ошибке)
     """
     tariff_key = await get_user_tariff(user_id)
-    tariff = TARIFFS.get(tariff_key, TARIFFS["free"])
+    tariff = TARIFFS.get(tariff_key, TARIFFS.get(DEFAULT_TARIFF))
+    
+    if not tariff:
+        tariff = TARIFFS[DEFAULT_TARIFF]
     
     # Проверка платформы
     allowed_platforms = tariff.get("platforms", [])
     if allowed_platforms != ["all"] and platform not in allowed_platforms:
-        return False, f"❌ Тариф «{tariff['name']}» не поддерживает {platform}.\n\n💡 Используй /tariff для смены тарифа."
+        return False, f"❌ Тариф «{tariff['name']}» не поддерживает {platform}.\n\n💡 Используй кнопку 'Выбрать тариф' для смены."
     
     # Проверка лимита
     if tariff["daily_limit"] == 9999:  # Безлимит
@@ -192,9 +211,15 @@ async def can_download(user_id: int, platform: str) -> tuple[bool, str]:
     
     user = await get_or_create_user(user_id)
     if user["downloads_today"] >= tariff["daily_limit"]:
-        return False, f"❌ Лимит исчерпан ({tariff['daily_limit']}/{tariff['daily_limit']}).\n\n💡 Используй /tariff для смены тарифа."
+        return False, f"❌ Лимит исчерпан ({tariff['daily_limit']}/{tariff['daily_limit']}).\n\n💡 Используй кнопку 'Выбрать тариф' для смены."
     
     return True, ""
+
+async def get_user_download_limit(user_id: int) -> int:
+    """Возвращает дневной лимит скачиваний для пользователя"""
+    tariff_key = await get_user_tariff(user_id)
+    tariff = TARIFFS.get(tariff_key, TARIFFS.get(DEFAULT_TARIFF))
+    return tariff.get("daily_limit", 3)
 
 # ==========================================
 # АДМИН-ФУНКЦИИ
@@ -235,7 +260,7 @@ async def get_all_users_with_stats():
                 "user_id": r["user_id"],
                 "downloads_today": r["downloads_today"],
                 "total_downloads": r["total_downloads"],
-                "tariff": r["tariff"] or "free",
+                "tariff": r["tariff"] or DEFAULT_TARIFF,
                 "is_subscribed": r["is_subscribed"],
                 "sub_end_date": r["sub_end_date"],
                 "last_activity": r["last_activity"]
@@ -245,7 +270,7 @@ async def get_all_users_with_stats():
 
 async def grant_sub_by_admin(user_id: int, tariff_key: str = "standard"):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+    end_date = (datetime.now() + timedelta(days=SUB_DURATION_DAYS)).strftime("%Y-%m-%d %H:%M:%S")
     
     async with pool.acquire() as conn:
         await conn.execute(
@@ -293,7 +318,7 @@ async def search_users_by_id(user_id: int):
             "user_id": record["user_id"],
             "downloads_today": record["downloads_today"],
             "total_downloads": record["total_downloads"],
-            "tariff": record["tariff"] or "free",
+            "tariff": record["tariff"] or DEFAULT_TARIFF,
             "is_subscribed": record["is_subscribed"],
             "sub_end_date": record["sub_end_date"],
             "last_activity": record["last_activity"]
