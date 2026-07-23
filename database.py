@@ -1,14 +1,26 @@
 import asyncpg
 from datetime import datetime
-from config import DATABASE_URL, FREE_DAILY_LIMIT
+from config import DATABASE_URL
 
 # Пул соединений с Supabase
 pool = None
 
 async def init_db():
     global pool
-    # Создаем постоянный пул подключений к PostgreSQL
-    pool = await asyncpg.create_pool(DATABASE_URL)
+    
+    if not DATABASE_URL:
+        print("❌ ОШИБКА: Переменная DATABASE_URL не найдена!")
+        return
+
+    masked_host = DATABASE_URL.split("@")[-1] if "@" in DATABASE_URL else "неизвестно"
+    print(f"📡 Подключаемся к Supabase: ...@{masked_host}")
+
+    # Подключение с обязательным SSL и отключенным statement_cache под Supabase Pooler
+    pool = await asyncpg.create_pool(
+        DATABASE_URL,
+        ssl="require",
+        statement_cache_size=0
+    )
     
     async with pool.acquire() as conn:
         await conn.execute("""
@@ -20,6 +32,7 @@ async def init_db():
                 sub_end_date VARCHAR(20)
             );
         """)
+    print("✅ База данных Supabase успешно инициализирована!")
 
 async def get_or_create_user(user_id: int):
     today = datetime.now().strftime("%Y-%m-%d")
