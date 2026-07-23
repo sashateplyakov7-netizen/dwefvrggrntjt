@@ -1,4 +1,3 @@
-Python
 import aiosqlite
 from datetime import datetime
 from config import DB_PATH, FREE_DAILY_LIMIT
