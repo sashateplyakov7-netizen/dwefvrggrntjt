@@ -90,3 +90,16 @@ async def activate_subscription(user_id: int):
             "UPDATE users SET is_subscribed = 1 WHERE user_id = $1", 
             user_id
         )
+        async def get_all_users():
+    """Получить ID всех пользователей для рассылки"""
+    async with pool.acquire() as conn:
+        records = await conn.fetch("SELECT user_id FROM users")
+        return [record["user_id"] for record in records]
+
+async def revoke_sub_by_admin(user_id: int):
+    """Забрать безлимит у пользователя вручную"""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET is_subscribed = 0 WHERE user_id = $1", 
+            user_id
+        )
