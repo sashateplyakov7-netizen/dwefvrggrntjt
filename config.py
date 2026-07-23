@@ -6,7 +6,7 @@ load_dotenv()
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 FREE_DAILY_LIMIT = 3
 SUB_PRICE = 100
-ADMIN_ID = int(os.getenv("ADMIN_ID", 0))  # <-- Добавь эту строчку
+ADMIN_ID = int(os.getenv("ADMIN_ID", 0))
 DATABASE_URL = os.getenv("DATABASE_URL")
 
 # --- ПРОВЕРКА ЛОГИНА ---
@@ -16,4 +16,3 @@ if DATABASE_URL:
         print(f"🔍 БОТ ПЫТАЕТСЯ ВОЙТИ ПОД ЛОГИНОМ: '{user_part}'")
     except Exception:
         pass
-import os
