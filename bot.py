@@ -54,7 +54,7 @@ class DownloadState(StatesGroup):
 # КЭШ ДЛЯ URL И ВИДЕО
 # ==========================================
 download_cache = {}
-video_cache = {}  # 🔥 КЭШ ДЛЯ ИНФОРМАЦИИ О ВИДЕО
+video_cache = {}
 
 # ==========================================
 # КЛАВИАТУРЫ
@@ -129,13 +129,11 @@ def get_quality_keyboard(qualities: list, url: str, is_premium: bool = False):
                 callback_data=f"dl_{q}_{url_hash}"
             )])
     
-    # 🎵 АУДИО — ДЛЯ ВСЕХ
     buttons.append([InlineKeyboardButton(
         text="🎵 Скачать аудио",
         callback_data=f"audio_{url_hash}"
     )])
     
-    # ✂️ ОБРЕЗКА — ТОЛЬКО ДЛЯ ПРЕМИУМ
     if is_premium:
         buttons.append([InlineKeyboardButton(
             text="✂️ Обрезать видео",
@@ -151,18 +149,15 @@ def get_quality_keyboard(qualities: list, url: str, is_premium: bool = False):
 async def get_video_info(url: str) -> dict:
     global video_cache
     
-    # 🔥 ПРОВЕРЯЕМ КЭШ
     if url in video_cache:
         print(f"📦 Информация из кэша: {url[:50]}...")
         return video_cache[url]
     
     try:
-        # 🔥 БЫСТРОЕ ОПРЕДЕЛЕНИЕ ПЛАТФОРМЫ
         platform = detect_platform(url)
         if platform == "unknown":
             return None
         
-        # 🔥 ПЫТАЕМСЯ ПОЛУЧИТЬ ИНФОРМАЦИЮ С ТАЙМАУТОМ 10 СЕКУНД
         try:
             info = await asyncio.wait_for(
                 asyncio.to_thread(extract_video_info, url),
@@ -191,7 +186,6 @@ async def get_video_info(url: str) -> dict:
                 "extractor": info.get("extractor", "unknown")
             }
         else:
-            # 🔥 БЫСТРЫЙ ОБХОДНОЙ ПУТЬ
             duration_sec = 60
             estimated_size_mb = {
                 "sd": round((duration_sec * 2) / 8, 1),
@@ -199,7 +193,6 @@ async def get_video_info(url: str) -> dict:
                 "fullhd": round((duration_sec * 10) / 8, 1)
             }
             
-            # Извлекаем название из URL
             title = "Видео"
             if "youtube.com" in url or "youtu.be" in url:
                 match = re.search(r"(?:v=|/)([a-zA-Z0-9_-]{11})", url)
@@ -227,7 +220,6 @@ async def get_video_info(url: str) -> dict:
                 "extractor": "fallback"
             }
         
-        # 🔥 СОХРАНЯЕМ В КЭШ
         video_cache[url] = result
         return result
         
@@ -910,14 +902,11 @@ async def handle_link(message: types.Message):
     
     info_msg = await message.answer("🔍 Получаю информацию о видео...", parse_mode="Markdown")
     
-    # 🔥 БЫСТРОЕ ПОЛУЧЕНИЕ ИНФОРМАЦИИ С КЭШЕМ
     video_info = await get_video_info(url)
     
     if not video_info or video_info.get("platform") == "unknown":
         await info_msg.edit_text(
-            "❌ **Не удалось определить платформу**\n\n"
-            "Проверь ссылку. Поддерживаются:\n"
-            "TikTok, Instagram, YouTube, Pinterest, Twitter/X, Facebook, Reddit, Vimeo, Telegram, VK, Rutube, Twitch, Dailymotion и другие",
+            "❌ Не удалось определить платформу\n\nПроверь ссылку. Поддерживаются:\nTikTok, Instagram, YouTube, Pinterest, Twitter/X, Facebook, Reddit, Vimeo, Telegram, VK, Rutube, Twitch, Dailymotion и другие",
             parse_mode="Markdown"
         )
         return
@@ -939,14 +928,19 @@ async def handle_link(message: types.Message):
         quality_names = {"sd": "SD (480p)", "hd": "HD (720p)", "fullhd": "Full HD (1080p)"}
         sizes_text += f"   • {quality_names.get(q, q)}: ~{size_mb} МБ\n"
     
+    # 🔥 УБИРАЕМ СПЕЦСИМВОЛЫ ИЗ НАЗВАНИЯ (ЧТОБЫ НЕ БЫЛО ОШИБКИ MARKDOWN)
+    title = video_info['title']
+    # Экранируем спецсимволы для Markdown
+    title = re.sub(r'([_*\[\]()~`>#+=|{}.!-])', r'\\\1', title)
+    
     preview_text = (
-        "📹 **Информация о видео**\n\n"
-        f"📌 Название: {video_info['title']}\n"
-        f"⏱ Длительность: {video_info['duration_str']}\n"
-        f"📱 Платформа: {video_info['platform'].capitalize()}\n"
-        f"📦 Размер файла:\n{sizes_text}\n"
-        f"💎 Ваш тариф: {tariff_info['name']}\n\n"
-        "⬇️ **Выберите действие:**"
+        "📹 Информация о видео\n\n"
+        f"Название: {title}\n"
+        f"Длительность: {video_info['duration_str']}\n"
+        f"Платформа: {video_info['platform'].capitalize()}\n"
+        f"Размер файла:\n{sizes_text}\n"
+        f"Ваш тариф: {tariff_info['name']}\n\n"
+        "Выберите действие:"
     )
     
     is_premium = tariff_key == "premium"
