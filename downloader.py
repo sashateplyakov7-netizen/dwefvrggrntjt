@@ -89,15 +89,38 @@ def detect_platform(url: str) -> str:
     return "unknown"
 
 # ==========================================
-# ОСНОВНАЯ ФУНКЦИЯ ЗАГРУЗКИ
+# 🔥 ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ КАЧЕСТВ (SD, HD, FULL HD)
 # ==========================================
-def _sync_download(url: str, output_path: str) -> bool:
+def get_format_for_quality(quality: str) -> str:
+    """
+    Возвращает формат для yt-dlp в зависимости от качества.
+    """
+    quality_formats = {
+        "sd": 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[filesize<50M]',
+        "hd": 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[filesize<100M]',
+        "fullhd": 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best[filesize<200M]',
+        "best": 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'
+    }
+    return quality_formats.get(quality, quality_formats["best"])
+
+# ==========================================
+# ОСНОВНАЯ ФУНКЦИЯ ЗАГРУЗКИ (С ПОДДЕРЖКОЙ КАЧЕСТВА)
+# ==========================================
+def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
+    """
+    Синхронная загрузка медиа с поддержкой качества.
+    quality: sd, hd, fullhd, best
+    """
     platform = detect_platform(url)
     print(f"🔍 [DEBUG] Платформа определена: {platform}")
+    print(f"🎬 [DEBUG] Качество: {quality}")
+    
+    # Получаем формат для качества
+    format_str = get_format_for_quality(quality)
     
     # Базовые опции
     ydl_opts = {
-        'format': 'b[ext=mp4][filesize<50M]/best[ext=mp4][filesize<50M]/best[filesize<50M]/best',
+        'format': format_str,
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
@@ -115,8 +138,7 @@ def _sync_download(url: str, output_path: str) -> bool:
         'sleep_interval': 1,
         'max_sleep_interval': 5,
         'sleep_interval_requests': 1,
-        'external_downloader': 'aria2c',
-        'external_downloader_args': ['-x', '16', '-s', '16'],
+        'user_agent': random.choice(USER_AGENTS),
     }
     
     # 🔥 ДОБАВЛЯЕМ ПРОКСИ (если есть)
@@ -129,12 +151,23 @@ def _sync_download(url: str, output_path: str) -> bool:
         cookies = get_youtube_cookies()
         if cookies:
             ydl_opts.update(cookies)
+        
+        # Специальные заголовки для YouTube
+        ydl_opts['http_headers'] = {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Connection': 'keep-alive',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+        }
     
     # 🔥 ОПЦИИ ДЛЯ КОНКРЕТНЫХ ПЛАТФОРМ
     if platform == "tiktok.com":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
         if COOKIES_FILE:
             ydl_opts['cookiefile'] = COOKIES_FILE
@@ -142,95 +175,70 @@ def _sync_download(url: str, output_path: str) -> bool:
     elif platform in ["instagram.com", "facebook.com"]:
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform in ["youtube.com", "youtu.be"]:
-        ydl_opts.update({
-            'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
-            'http_headers': {
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Connection': 'keep-alive',
-                'Sec-Fetch-Mode': 'navigate',
-                'Sec-Fetch-Site': 'none',
-                'Sec-Fetch-User': '?1',
-                'Upgrade-Insecure-Requests': '1',
-            }
-        })
+        # Уже настроено выше
+        pass
     
     elif platform == "pinterest.com":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform in ["twitter.com", "x.com"]:
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform in ["reddit.com", "vimeo.com"]:
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "t.me":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform in ["vk.com", "vkontakte.ru"]:
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "likee.com":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "rutube.ru":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "twitch.tv":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "coub.com":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "tumblr.com":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "dailymotion.com":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "9gag.com":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': random.choice(USER_AGENTS),
         })
     
     try:
@@ -285,14 +293,15 @@ def _sync_download(url: str, output_path: str) -> bool:
         return False
 
 # ==========================================
-# АСИНХРОННАЯ ОБЁРТКА
+# АСИНХРОННАЯ ОБЁРТКА (С ПОДДЕРЖКОЙ КАЧЕСТВА)
 # ==========================================
-async def download_media(url: str, output_path: str) -> bool:
+async def download_media(url: str, output_path: str, quality: str = "best") -> bool:
     """
     Асинхронная загрузка медиа с поддержкой множества платформ.
+    quality: sd, hd, fullhd, best
     """
-    print(f"🚀 [DEBUG] download_media вызвана для: {url}")
-    return await asyncio.to_thread(_sync_download, url, output_path)
+    print(f"🚀 [DEBUG] download_media вызвана для: {url}, качество: {quality}")
+    return await asyncio.to_thread(_sync_download, url, output_path, quality)
 
 # ==========================================
 # 🔥 ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО (УЛУЧШЕННАЯ)
@@ -300,7 +309,7 @@ async def download_media(url: str, output_path: str) -> bool:
 def extract_video_info(url: str) -> dict:
     """
     Извлекает информацию о видео без скачивания.
-    Возвращает: {title, duration, views, likes, uploader, thumbnail}
+    Возвращает: {title, duration, views, likes, uploader, thumbnail, platform}
     Теперь использует куки для всех платформ!
     """
     ydl_opts = {
@@ -337,7 +346,7 @@ def extract_video_info(url: str) -> dict:
                 return get_empty_info(url)
             
             # Пробуем извлечь данные
-            title = info.get('title', 'Неизвестно')
+            title = info.get('title', info.get('fulltitle', 'Неизвестно'))
             duration = info.get('duration', 0)
             view_count = info.get('view_count', 0)
             like_count = info.get('like_count', 0)
@@ -347,7 +356,11 @@ def extract_video_info(url: str) -> dict:
             
             # 🔥 ЕСЛИ НЕТ НАЗВАНИЯ — ПЫТАЕМСЯ ПОЛУЧИТЬ ЧЕРЕЗ ALTERNATIVE
             if title == 'Неизвестно' or not title:
-                title = info.get('fulltitle', info.get('description', 'Видео'))[:50]
+                title = info.get('description', 'Видео')[:50]
+            
+            # 🔥 ЕСЛИ ВСЁ РАВНО НЕТ — ПЫТАЕМСЯ ИЗВЛЕЧЬ ИЗ URL
+            if title == 'Видео' or not title:
+                title = extract_title_from_url(url)
             
             return {
                 "title": title,
@@ -367,10 +380,57 @@ def extract_video_info(url: str) -> dict:
         print(f"❌ Ошибка извлечения информации: {e}", flush=True)
         return get_empty_info(url)
 
+def extract_title_from_url(url: str) -> str:
+    """Пытается извлечь название из URL"""
+    platform = detect_platform(url)
+    
+    if "youtube.com" in url or "youtu.be" in url:
+        # Пытаемся найти ID видео
+        match = re.search(r"(?:v=|/)([a-zA-Z0-9_-]{11})", url)
+        if match:
+            video_id = match.group(1)
+            return f"YouTube видео {video_id}"
+        return "YouTube видео"
+    
+    elif "tiktok.com" in url:
+        match = re.search(r"/video/(\d+)", url)
+        if match:
+            video_id = match.group(1)
+            return f"TikTok видео {video_id}"
+        return "TikTok видео"
+    
+    elif "instagram.com" in url:
+        match = re.search(r"/reel/([^/?]+)", url)
+        if match:
+            video_id = match.group(1)
+            return f"Instagram Reel {video_id}"
+        return "Instagram видео"
+    
+    elif "pinterest.com" in url:
+        return "Pinterest видео"
+    
+    elif "twitter.com" in url or "x.com" in url:
+        return "Twitter/X видео"
+    
+    elif "facebook.com" in url:
+        return "Facebook видео"
+    
+    elif "reddit.com" in url:
+        return "Reddit видео"
+    
+    elif "vimeo.com" in url:
+        match = re.search(r"/(\d+)", url)
+        if match:
+            video_id = match.group(1)
+            return f"Vimeo видео {video_id}"
+        return "Vimeo видео"
+    
+    return "Видео"
+
 def get_empty_info(url: str) -> dict:
     """Возвращает пустую информацию о видео"""
     return {
-        "title": "Не удалось получить название",
+        "title": extract_title_from_url(url),
         "duration": 0,
         "views": 0,
         "likes": 0,
@@ -383,10 +443,11 @@ def get_empty_info(url: str) -> dict:
 # ==========================================
 # ЗАГРУЗКА С ПРОГРЕССОМ
 # ==========================================
-async def download_media_with_progress(url: str, output_path: str, progress_callback) -> bool:
+async def download_media_with_progress(url: str, output_path: str, progress_callback, quality: str = "best") -> bool:
     def _sync_with_progress():
+        format_str = get_format_for_quality(quality)
         ydl_opts = {
-            'format': 'b[ext=mp4][filesize<50M]/best[ext=mp4][filesize<50M]/best[filesize<50M]/best',
+            'format': format_str,
             'outtmpl': output_path,
             'quiet': True,
             'no_warnings': True,
@@ -396,6 +457,7 @@ async def download_media_with_progress(url: str, output_path: str, progress_call
             'socket_timeout': 10,
             'retries': 10,
             'fragment_retries': 10,
+            'user_agent': random.choice(USER_AGENTS),
             'progress_hooks': [lambda d: progress_callback(
                 percent=d.get('_percent_str', '0%').strip(),
                 speed=d.get('_speed_str', '0'),
@@ -425,34 +487,11 @@ async def is_valid_url(url: str) -> bool:
         return False
 
 # ==========================================
-# ЗАГРУЗКА В ВЫСОКОМ КАЧЕСТВЕ
+# ЗАГРУЗКА В ВЫСОКОМ КАЧЕСТВЕ (DEPRECATED)
 # ==========================================
 async def download_media_hq(url: str, output_path: str) -> bool:
-    def _sync_hq():
-        ydl_opts = {
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
-            'outtmpl': output_path,
-            'quiet': True,
-            'no_warnings': True,
-            'noplaylist': True,
-            'max_filesize': 200 * 1024 * 1024,
-            'concurrent_fragment_downloads': 5,
-            'socket_timeout': 10,
-            'retries': 10,
-            'fragment_retries': 10,
-            'user_agent': random.choice(USER_AGENTS),
-        }
-        if "youtube.com" in url or "youtu.be" in url:
-            if COOKIES_FILE:
-                ydl_opts['cookiefile'] = COOKIES_FILE
-        try:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
-            return os.path.exists(output_path)
-        except Exception as e:
-            print(f"❌ Ошибка HQ загрузки: {e}", flush=True)
-            return False
-    return await asyncio.to_thread(_sync_hq)
+    """Используй download_media(url, output_path, 'fullhd') вместо этого"""
+    return await download_media(url, output_path, "fullhd")
 
 # ==========================================
 # ЗАГРУЗКА ТОЛЬКО АУДИО
@@ -489,11 +528,12 @@ async def download_audio(url: str, output_path: str) -> bool:
 # ==========================================
 # 🔥 ЗАГРУЗКА С РОТАЦИЕЙ USER-AGENT
 # ==========================================
-async def download_media_rotating(url: str, output_path: str) -> bool:
+async def download_media_rotating(url: str, output_path: str, quality: str = "best") -> bool:
     def _sync_rotating():
         ua = random.choice(USER_AGENTS)
+        format_str = get_format_for_quality(quality)
         ydl_opts = {
-            'format': 'b[ext=mp4][filesize<50M]/best[ext=mp4][filesize<50M]/best[filesize<50M]/best',
+            'format': format_str,
             'outtmpl': output_path,
             'quiet': True,
             'no_warnings': True,
@@ -516,3 +556,47 @@ async def download_media_rotating(url: str, output_path: str) -> bool:
             print(f"❌ Ошибка загрузки с ротацией: {e}", flush=True)
             return False
     return await asyncio.to_thread(_sync_rotating)
+
+# ==========================================
+# 🔥 ДОПОЛНИТЕЛЬНАЯ: ПОЛУЧЕНИЕ ДОСТУПНЫХ КАЧЕСТВ
+# ==========================================
+def get_available_qualities(url: str) -> list:
+    """
+    Возвращает список доступных качеств для видео.
+    """
+    try:
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': True,
+        }
+        if "youtube.com" in url or "youtu.be" in url:
+            if COOKIES_FILE:
+                ydl_opts['cookiefile'] = COOKIES_FILE
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=False)
+            if not info:
+                return ["sd"]
+            
+            # Проверяем доступные форматы
+            formats = info.get('formats', [])
+            heights = set()
+            for f in formats:
+                height = f.get('height', 0)
+                if height > 0:
+                    heights.add(height)
+            
+            qualities = []
+            if any(h <= 480 for h in heights):
+                qualities.append("sd")
+            if any(480 < h <= 720 for h in heights):
+                qualities.append("hd")
+            if any(h > 720 for h in heights):
+                qualities.append("fullhd")
+            
+            return qualities if qualities else ["sd"]
+            
+    except Exception as e:
+        print(f"❌ Ошибка получения качеств: {e}", flush=True)
+        return ["sd"]
