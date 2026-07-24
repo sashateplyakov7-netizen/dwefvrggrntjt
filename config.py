@@ -40,7 +40,7 @@ TARIFFS = {
     },
     "premium": {
         "name": "Премиум",
-        "price": 300,        # 300 рублей (повысили)
+        "price": 300,        # 300 рублей
         "daily_limit": 9999, # Безлимит
         "platforms": ["all"],
         "max_duration": 3600,
@@ -62,12 +62,12 @@ TARIFF_STARS = {
 DEFAULT_TARIFF = "free"
 SUB_DURATION_DAYS = 30  # Длительность подписки в днях
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 МБ для yt-dlp
+MAX_HQ_FILE_SIZE = 200 * 1024 * 1024  # 200 МБ для премиума
 
 # ==========================================
 # 🔥 ВСЕ ПОДДЕРЖИВАЕМЫЕ ПЛАТФОРМЫ
 # ==========================================
 SUPPORTED_PLATFORMS = [
-    # Основные
     "tiktok.com",
     "instagram.com",
     "youtube.com",
@@ -79,7 +79,6 @@ SUPPORTED_PLATFORMS = [
     "reddit.com",
     "vimeo.com",
     "t.me",
-    # Новые
     "vk.com",
     "vkontakte.ru",
     "likee.com",
@@ -102,3 +101,21 @@ BOT_USERNAME = "Downloader_Dowo_Bot"  # БЕЗ @
 YOOMONEY_TOKEN = os.getenv("YOOMONEY_TOKEN")
 YOOMONEY_WALLET = os.getenv("YOOMONEY_WALLET")
 YOOMONEY_REDIRECT_URI = os.getenv("YOOMONEY_REDIRECT_URI", "https://t.me/Downloader_Dowo_Bot")
+
+# ==========================================
+# ЛОГИРОВАНИЕ
+# ==========================================
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
+LOG_FILE = os.getenv("LOG_FILE", "bot.log")
+
+# ==========================================
+# РАЗРЕШЁННЫЕ ФОРМАТЫ
+# ==========================================
+ALLOWED_VIDEO_EXTENSIONS = [".mp4", ".webm", ".mkv", ".avi"]
+ALLOWED_AUDIO_EXTENSIONS = [".mp3", ".m4a", ".wav"]
+
+# ==========================================
+# НАСТРОЙКИ СКАЧИВАНИЯ
+# ==========================================
+DOWNLOAD_TIMEOUT = int(os.getenv("DOWNLOAD_TIMEOUT", 120))
+MAX_CONCURRENT_DOWNLOADS = int(os.getenv("MAX_CONCURRENT_DOWNLOADS", 3))
