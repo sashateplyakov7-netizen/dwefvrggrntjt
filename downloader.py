@@ -43,6 +43,7 @@ def detect_platform(url: str) -> str:
 # ==========================================
 def _sync_download(url: str, output_path: str) -> bool:
     platform = detect_platform(url)
+    print(f"🔍 [DEBUG] Платформа определена: {platform}")
     
     # Базовые опции
     ydl_opts = {
@@ -54,13 +55,27 @@ def _sync_download(url: str, output_path: str) -> bool:
         'max_filesize': MAX_FILE_SIZE,
         'concurrent_fragment_downloads': 5,
         'socket_timeout': 30,
+        'retries': 15,
+        'fragment_retries': 15,
+        'skip_unavailable_fragments': True,
+        'ignoreerrors': True,
+        'extract_flat': False,
+        'prefer_ffmpeg': True,
+        'ffmpeg_location': '/usr/bin/ffmpeg' if os.name != 'nt' else None,
+        'sleep_interval': 1,
+        'max_sleep_interval': 5,
+        'sleep_interval_requests': 1,
     }
     
     # 🔥 ОПЦИИ ДЛЯ КОНКРЕТНЫХ ПЛАТФОРМ
     if platform == "tiktok.com":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'user_agent': random.choice(USER_AGENTS),
+            'cookiesfrombrowser': ('chrome',),
         })
+        if COOKIES_FILE:
+            ydl_opts['cookiefile'] = COOKIES_FILE
     
     elif platform in ["instagram.com", "facebook.com"]:
         ydl_opts.update({
@@ -83,7 +98,6 @@ def _sync_download(url: str, output_path: str) -> bool:
                 'Upgrade-Insecure-Requests': '1',
             }
         })
-        # 🔥 КУКИ ТОЛЬКО ДЛЯ YOUTUBE
         if COOKIES_FILE:
             ydl_opts['cookiefile'] = COOKIES_FILE
     
@@ -96,6 +110,7 @@ def _sync_download(url: str, output_path: str) -> bool:
     elif platform in ["twitter.com", "x.com"]:
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform in ["reddit.com", "vimeo.com"]:
@@ -131,6 +146,7 @@ def _sync_download(url: str, output_path: str) -> bool:
     elif platform == "twitch.tv":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "coub.com":
@@ -157,22 +173,8 @@ def _sync_download(url: str, output_path: str) -> bool:
             'user_agent': random.choice(USER_AGENTS),
         })
     
-    # 🔥 УНИВЕРСАЛЬНЫЕ ОПЦИИ ДЛЯ ВСЕХ
-    ydl_opts.update({
-        'retries': 15,
-        'fragment_retries': 15,
-        'skip_unavailable_fragments': True,
-        'ignoreerrors': True,
-        'extract_flat': False,
-        'prefer_ffmpeg': True,
-        'ffmpeg_location': '/usr/bin/ffmpeg' if os.name != 'nt' else None,
-        'sleep_interval': 1,
-        'max_sleep_interval': 5,
-        'sleep_interval_requests': 1,
-    })
-    
     try:
-        print(f"📥 Скачивание с {platform}: {url}", flush=True)
+        print(f"📥 [DEBUG] Начинаю скачивание с {platform}: {url}", flush=True)
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
@@ -191,11 +193,29 @@ def _sync_download(url: str, output_path: str) -> bool:
             print("🔄 Пробуем альтернативный формат...", flush=True)
             fallback_opts = ydl_opts.copy()
             fallback_opts['format'] = 'best'
+            fallback_opts['cookiefile'] = None
             with yt_dlp.YoutubeDL(fallback_opts) as ydl:
                 ydl.download([url])
             return os.path.exists(output_path)
         except Exception as e2:
             print(f"❌ Альтернативная загрузка не удалась: {e2}", flush=True)
+            
+            if platform == "tiktok.com":
+                print("🔄 Пробуем скачать через альтернативный API...", flush=True)
+                try:
+                    import requests
+                    api_url = f"https://www.tikwm.com/api/?url={url}"
+                    response = requests.get(api_url, timeout=10)
+                    if response.status_code == 200:
+                        data = response.json()
+                        if data.get("code") == 0:
+                            video_url = data["data"]["play"]
+                            import urllib.request
+                            urllib.request.urlretrieve(video_url, output_path)
+                            return os.path.exists(output_path)
+                except Exception as e3:
+                    print(f"❌ Альтернативный API не сработал: {e3}")
+            
             return False
             
     except Exception as e:
@@ -209,16 +229,13 @@ async def download_media(url: str, output_path: str) -> bool:
     """
     Асинхронная загрузка медиа с поддержкой множества платформ.
     """
+    print(f"🚀 [DEBUG] download_media вызвана для: {url}")
     return await asyncio.to_thread(_sync_download, url, output_path)
 
 # ==========================================
 # ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО
 # ==========================================
 def extract_video_info(url: str) -> dict:
-    """
-    Извлекает информацию о видео без скачивания.
-    Возвращает: {title, duration, views, likes, uploader, thumbnail}
-    """
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
@@ -259,10 +276,6 @@ def extract_video_info(url: str) -> dict:
 # ЗАГРУЗКА С ПРОГРЕССОМ
 # ==========================================
 async def download_media_with_progress(url: str, output_path: str, progress_callback) -> bool:
-    """
-    Скачивание с отслеживанием прогресса.
-    progress_callback принимает аргументы: (percent, speed, eta)
-    """
     def _sync_with_progress():
         ydl_opts = {
             'format': 'b[ext=mp4][filesize<50M]/best[ext=mp4][filesize<50M]/best[filesize<50M]/best',
@@ -281,11 +294,9 @@ async def download_media_with_progress(url: str, output_path: str, progress_call
                 eta=d.get('_eta_str', 'unknown')
             )],
         }
-        
         if "youtube.com" in url or "youtu.be" in url:
             if COOKIES_FILE:
                 ydl_opts['cookiefile'] = COOKIES_FILE
-        
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -293,16 +304,12 @@ async def download_media_with_progress(url: str, output_path: str, progress_call
         except Exception as e:
             print(f"❌ Ошибка загрузки: {e}", flush=True)
             return False
-    
     return await asyncio.to_thread(_sync_with_progress)
 
 # ==========================================
 # ПРОВЕРКА ВАЛИДНОСТИ ССЫЛКИ
 # ==========================================
 async def is_valid_url(url: str) -> bool:
-    """
-    Проверяет, является ли ссылка валидной для скачивания.
-    """
     try:
         info = await asyncio.to_thread(extract_video_info, url)
         return info.get("extractor") != "unknown"
@@ -313,9 +320,6 @@ async def is_valid_url(url: str) -> bool:
 # ЗАГРУЗКА В ВЫСОКОМ КАЧЕСТВЕ
 # ==========================================
 async def download_media_hq(url: str, output_path: str) -> bool:
-    """
-    Скачивает видео в наилучшем доступном качестве.
-    """
     def _sync_hq():
         ydl_opts = {
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/bestvideo+bestaudio/best[ext=mp4]/best',
@@ -323,18 +327,16 @@ async def download_media_hq(url: str, output_path: str) -> bool:
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'max_filesize': 100 * 1024 * 1024,
+            'max_filesize': 200 * 1024 * 1024,
             'concurrent_fragment_downloads': 5,
             'socket_timeout': 10,
             'retries': 10,
             'fragment_retries': 10,
             'user_agent': random.choice(USER_AGENTS),
         }
-        
         if "youtube.com" in url or "youtu.be" in url:
             if COOKIES_FILE:
                 ydl_opts['cookiefile'] = COOKIES_FILE
-        
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -342,16 +344,12 @@ async def download_media_hq(url: str, output_path: str) -> bool:
         except Exception as e:
             print(f"❌ Ошибка HQ загрузки: {e}", flush=True)
             return False
-    
     return await asyncio.to_thread(_sync_hq)
 
 # ==========================================
 # ЗАГРУЗКА ТОЛЬКО АУДИО
 # ==========================================
 async def download_audio(url: str, output_path: str) -> bool:
-    """
-    Скачивает только аудиодорожку в MP3.
-    """
     def _sync_audio():
         ydl_opts = {
             'format': 'bestaudio/best',
@@ -368,11 +366,9 @@ async def download_audio(url: str, output_path: str) -> bool:
             'retries': 10,
             'user_agent': random.choice(USER_AGENTS),
         }
-        
         if "youtube.com" in url or "youtu.be" in url:
             if COOKIES_FILE:
                 ydl_opts['cookiefile'] = COOKIES_FILE
-        
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -380,19 +376,14 @@ async def download_audio(url: str, output_path: str) -> bool:
         except Exception as e:
             print(f"❌ Ошибка загрузки аудио: {e}", flush=True)
             return False
-    
     return await asyncio.to_thread(_sync_audio)
 
 # ==========================================
 # 🔥 ЗАГРУЗКА С РОТАЦИЕЙ USER-AGENT
 # ==========================================
 async def download_media_rotating(url: str, output_path: str) -> bool:
-    """
-    Скачивание с ротацией User-Agent для обхода блокировок.
-    """
     def _sync_rotating():
         ua = random.choice(USER_AGENTS)
-        
         ydl_opts = {
             'format': 'b[ext=mp4][filesize<50M]/best[ext=mp4][filesize<50M]/best[filesize<50M]/best',
             'outtmpl': output_path,
@@ -406,11 +397,9 @@ async def download_media_rotating(url: str, output_path: str) -> bool:
             'retries': 15,
             'fragment_retries': 15,
         }
-        
         if "youtube.com" in url or "youtu.be" in url:
             if COOKIES_FILE:
                 ydl_opts['cookiefile'] = COOKIES_FILE
-        
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -418,5 +407,4 @@ async def download_media_rotating(url: str, output_path: str) -> bool:
         except Exception as e:
             print(f"❌ Ошибка загрузки с ротацией: {e}", flush=True)
             return False
-    
     return await asyncio.to_thread(_sync_rotating)
