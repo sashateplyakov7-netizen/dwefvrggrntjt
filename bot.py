@@ -25,7 +25,7 @@ from database import (
     save_payment_label, get_pending_payment, clear_pending_payment,
     increment_paid_premium_count
 )
-from downloader import download_media, detect_platform, extract_video_info
+from downloader import download_media, download_audio, detect_platform, extract_video_info
 
 # ==========================================
 # НАСТРОЙКА
@@ -45,6 +45,10 @@ class AdminState(StatesGroup):
     waiting_for_revoke_sub_id = State()
     waiting_for_answer = State()
     waiting_for_answer_to_user = State()
+
+class DownloadState(StatesGroup):
+    waiting_for_cut_start = State()
+    waiting_for_cut_end = State()
 
 # ==========================================
 # КЭШ ДЛЯ URL
@@ -76,27 +80,23 @@ def get_tariff_keyboard():
 
 def get_payment_keyboard(tariff_key: str):
     keyboard = [
-        [InlineKeyboardButton(text="Оплатить звёздами", callback_data=f"pay_stars_{tariff_key}")],
-        [InlineKeyboardButton(text="Оплатить картой", callback_data=f"pay_card_{tariff_key}")]
+        [InlineKeyboardButton(text="⭐ Оплатить звёздами", callback_data=f"pay_stars_{tariff_key}")],
+        [InlineKeyboardButton(text="💳 Оплатить картой", callback_data=f"pay_card_{tariff_key}")]
     ]
-    
-    if tariff_key == "premium":
-        keyboard.append([InlineKeyboardButton(text="+3 дня бонусом при оплате картой", callback_data="noop")])
-    
     keyboard.append([InlineKeyboardButton(text="Назад", callback_data="main_menu")])
-    
     return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_admin_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats")],
         [InlineKeyboardButton(text="📢 Рассылка", callback_data="admin_broadcast")],
-        [
-            InlineKeyboardButton(text="🎁 Выдать подписку", callback_data="admin_give_sub"),
-            InlineKeyboardButton(text="❌ Забрать подписку", callback_data="admin_revoke_sub")
-        ],
+        [InlineKeyboardButton(text="🎁 Выдать подписку", callback_data="admin_give_sub")],
+        [InlineKeyboardButton(text="❌ Забрать подписку", callback_data="admin_revoke_sub")],
+        [InlineKeyboardButton(text="👥 Все пользователи", callback_data="admin_users")],
+        [InlineKeyboardButton(text="🏆 Топ пользователей", callback_data="admin_top")],
         [InlineKeyboardButton(text="💬 Ответить пользователю", callback_data="admin_answer")],
         [InlineKeyboardButton(text="📦 Экспорт базы", callback_data="admin_export")],
+        [InlineKeyboardButton(text="🧹 Очистка неактивных", callback_data="admin_cleanup")],
         [InlineKeyboardButton(text="🔄 Отмена", callback_data="admin_cancel")]
     ])
 
@@ -108,14 +108,14 @@ def get_user_stats_keyboard():
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
-def get_quality_keyboard(qualities: list, url: str):
+def get_quality_keyboard(qualities: list, url: str, is_premium: bool = False):
     global download_cache
     
     buttons = []
     quality_names = {
-        "sd": "SD (480p)",
-        "hd": "HD (720p)",
-        "fullhd": "Full HD (1080p)"
+        "sd": "📥 SD (480p)",
+        "hd": "📥 HD (720p)",
+        "fullhd": "📥 Full HD (1080p)"
     }
     
     url_hash = hashlib.md5(url.encode()).hexdigest()[:10]
@@ -127,6 +127,19 @@ def get_quality_keyboard(qualities: list, url: str):
                 text=quality_names[q],
                 callback_data=f"dl_{q}_{url_hash}"
             )])
+    
+    # 🎵 АУДИО — ДЛЯ ВСЕХ
+    buttons.append([InlineKeyboardButton(
+        text="🎵 Скачать аудио",
+        callback_data=f"audio_{url_hash}"
+    )])
+    
+    # ✂️ ОБРЕЗКА — ТОЛЬКО ДЛЯ ПРЕМИУМ
+    if is_premium:
+        buttons.append([InlineKeyboardButton(
+            text="✂️ Обрезать видео",
+            callback_data=f"cut_{url_hash}"
+        )])
     
     buttons.append([InlineKeyboardButton(text="Главное меню", callback_data="main_menu")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
@@ -210,18 +223,18 @@ async def cmd_tariff(message: types.Message):
         "📱 **Бесплатный** — 0 ₽\n"
         "   • 3 скачивания в день\n"
         "   • TikTok, Instagram, Pinterest\n"
-        "   • SD качество (480p)\n\n"
+        "   • SD (480p)\n\n"
         "⚡ **Стандарт** — 100 ₽/мес\n"
         "   • 30 скачиваний в день\n"
         "   • TikTok, Instagram, Pinterest, Twitter, Facebook\n"
-        "   • HD качество (720p)\n\n"
+        "   • HD (720p)\n\n"
         "💎 **Премиум** — 300 ₽/мес\n"
-        "   • Безлимит скачиваний\n"
-        "   • Все поддерживаемые платформы\n"
-        "   • Full HD качество (1080p)\n"
-        "   • Умный кэш\n"
-        "   • Приоритетная обработка\n\n"
-        "🎁 Акция: каждый 3-й Премиум — бесплатно",
+        "   • Безлимит\n"
+        "   • Все платформы\n"
+        "   • Full HD (1080p)\n"
+        "   • Обрезка видео по времени\n"
+        "   • Умный кэш\n\n"
+        "🎁 Каждый 3-й Премиум — бесплатно",
         parse_mode="Markdown",
         reply_markup=get_tariff_keyboard()
     )
@@ -238,18 +251,18 @@ async def cmd_stats(message: types.Message):
     if stats:
         text = (
             "📊 **Статистика**\n\n"
-            f"Сегодня: {stats['downloads_today']}\n"
-            f"Всего: {stats['total_downloads']}\n"
-            f"Тариф: {tariff_info['name']}\n"
-            f"Статус: {'Активна' if stats['is_subscribed'] == 1 else 'Не активна'}\n"
-            f"Действует до: {stats['sub_end_date'] or 'Нет'}\n\n"
-            f"Платформ: {len(tariff_info['platforms']) if tariff_info['platforms'] != ['all'] else 'Все'}\n"
-            f"Лимит: {tariff_info['daily_limit'] if tariff_info['daily_limit'] != 9999 else 'Безлимит'}\n\n"
+            f"📥 Сегодня: {stats['downloads_today']}\n"
+            f"📦 Всего: {stats['total_downloads']}\n"
+            f"💎 Тариф: {tariff_info['name']}\n"
+            f"📊 Статус: {'🟢 Активна' if stats['is_subscribed'] == 1 else '🔴 Не активна'}\n"
+            f"📅 Действует до: {stats['sub_end_date'] or 'Нет'}\n\n"
+            f"🌐 Платформ: {len(tariff_info['platforms']) if tariff_info['platforms'] != ['all'] else 'Все'}\n"
+            f"📊 Лимит: {tariff_info['daily_limit'] if tariff_info['daily_limit'] != 9999 else '♾️ Безлимит'}\n\n"
             f"🎁 Рефералы: {referral_info['count']}\n"
             f"🎉 Куплено Премиум: {premium_count}"
         )
     else:
-        text = "Не удалось получить данные"
+        text = "❌ Не удалось получить данные"
     
     await message.answer(text, parse_mode="Markdown", reply_markup=get_user_stats_keyboard())
 
@@ -257,14 +270,14 @@ async def cmd_stats(message: types.Message):
 async def cmd_help(message: types.Message):
     await message.answer(
         "📜 **Команды**\n\n"
-        "/start — Главное меню\n"
-        "/tariff — Тарифы\n"
-        "/stats — Статистика\n"
-        "/referral — Рефералы\n"
-        "/promo — Акция\n"
-        "/admin — Админ-панель\n"
-        "/help — Справка\n\n"
-        "🔗 Отправь ссылку на видео — я скачаю его\n\n"
+        "🔹 /start — Главное меню\n"
+        "🔹 /tariff — Тарифы\n"
+        "🔹 /stats — Статистика\n"
+        "🔹 /referral — Рефералы\n"
+        "🔹 /promo — Акция\n"
+        "🔹 /admin — Админ-панель\n"
+        "🔹 /help — Справка\n\n"
+        "📌 Отправь ссылку на видео — я скачаю его\n\n"
         "📱 Поддерживаемые платформы:\n"
         "TikTok, Instagram, YouTube, Pinterest, Twitter/X, Facebook, Reddit, Vimeo, Telegram, VK, Rutube, Twitch, Dailymotion и другие",
         parse_mode="Markdown"
@@ -278,18 +291,18 @@ async def cmd_referral(message: types.Message):
     
     next_reward = ""
     if referral_info["count"] < 1:
-        next_reward = "Пригласи 1 друга → Стандарт на месяц"
+        next_reward = "🎯 Пригласи 1 друга → Стандарт на месяц"
     elif referral_info["count"] < 3:
-        next_reward = "Пригласи ещё 3 друзей → Премиум на месяц"
+        next_reward = "🎯 Пригласи ещё 3 друзей → Премиум на месяц"
     else:
-        next_reward = "Все награды получены"
+        next_reward = "🏆 Все награды получены"
     
     await message.answer(
         "🎁 **Реферальная программа**\n\n"
-        f"Ссылка:\n`{link}`\n\n"
-        f"Приглашено: {referral_info['count']}\n"
-        f"Стандарт: {'Получен' if referral_info['standard_used'] else 'Не получен'}\n"
-        f"Премиум: {'Получен' if referral_info['premium_used'] else 'Не получен'}\n\n"
+        f"🔗 Ссылка:\n`{link}`\n\n"
+        f"👥 Приглашено: {referral_info['count']}\n"
+        f"✅ Стандарт: {'Получен' if referral_info['standard_used'] else 'Не получен'}\n"
+        f"✅ Премиум: {'Получен' if referral_info['premium_used'] else 'Не получен'}\n\n"
         f"{next_reward}",
         parse_mode="Markdown"
     )
@@ -303,8 +316,8 @@ async def cmd_promo(message: types.Message):
         text = (
             "🎁 **Акция**\n\n"
             "Каждый 3-й Премиум — бесплатно\n\n"
-            "Купи 2 Премиума, 3-й получи в подарок\n\n"
-            "/tariff — выбрать тариф"
+            "💡 Купи 2 Премиума, 3-й получи в подарок\n\n"
+            "➡️ /tariff — выбрать тариф"
         )
     else:
         next_free = 3 - (count % 3)
@@ -313,9 +326,9 @@ async def cmd_promo(message: types.Message):
         
         text = (
             "🎁 **Акция**\n\n"
-            f"Куплено Премиум: {count}\n"
-            f"Осталось оплатить: {next_free} до бесплатного месяца\n\n"
-            "/tariff — выбрать тариф"
+            f"📊 Куплено Премиум: {count}\n"
+            f"🎯 Осталось оплатить: {next_free} до бесплатного месяца\n\n"
+            "➡️ /tariff — выбрать тариф"
         )
     
     await message.answer(text, parse_mode="Markdown")
@@ -333,7 +346,7 @@ async def start_cmd(message: types.Message):
                 if result:
                     await message.answer(result, parse_mode="Markdown")
             else:
-                await message.answer("Нельзя пригласить самого себя")
+                await message.answer("❌ Нельзя пригласить самого себя")
         except ValueError:
             pass
     
@@ -357,9 +370,9 @@ async def start_cmd(message: types.Message):
 @dp.callback_query(F.data == "main_menu")
 async def main_menu_callback(callback: types.CallbackQuery):
     await callback.message.edit_text(
-        "👋 Главное меню\n\n"
+        "👋 **Главное меню**\n\n"
         "Отправь ссылку на видео — я скачаю его\n\n"
-        f"Бесплатный лимит: {FREE_DAILY_LIMIT} скачиваний в день",
+        f"📊 Бесплатный лимит: {FREE_DAILY_LIMIT} скачиваний в день",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
@@ -373,18 +386,18 @@ async def referral_callback(callback: types.CallbackQuery):
     
     next_reward = ""
     if referral_info["count"] < 1:
-        next_reward = "Пригласи 1 друга → Стандарт на месяц"
+        next_reward = "🎯 Пригласи 1 друга → Стандарт на месяц"
     elif referral_info["count"] < 3:
-        next_reward = "Пригласи ещё 3 друзей → Премиум на месяц"
+        next_reward = "🎯 Пригласи ещё 3 друзей → Премиум на месяц"
     else:
-        next_reward = "Все награды получены"
+        next_reward = "🏆 Все награды получены"
     
     await callback.message.edit_text(
-        "🎁 Реферальная программа\n\n"
-        f"Ссылка:\n`{link}`\n\n"
-        f"Приглашено: {referral_info['count']}\n"
-        f"Стандарт: {'Получен' if referral_info['standard_used'] else 'Не получен'}\n"
-        f"Премиум: {'Получен' if referral_info['premium_used'] else 'Не получен'}\n\n"
+        "🎁 **Реферальная программа**\n\n"
+        f"🔗 Ссылка:\n`{link}`\n\n"
+        f"👥 Приглашено: {referral_info['count']}\n"
+        f"✅ Стандарт: {'Получен' if referral_info['standard_used'] else 'Не получен'}\n"
+        f"✅ Премиум: {'Получен' if referral_info['premium_used'] else 'Не получен'}\n\n"
         f"{next_reward}",
         parse_mode="Markdown"
     )
@@ -397,10 +410,10 @@ async def show_promo_callback(callback: types.CallbackQuery):
     
     if count == 0:
         text = (
-            "🎁 Акция\n\n"
+            "🎁 **Акция**\n\n"
             "Каждый 3-й Премиум — бесплатно\n\n"
-            "Купи 2 Премиума, 3-й получи в подарок\n\n"
-            "Нажми «Тарифы» чтобы начать"
+            "💡 Купи 2 Премиума, 3-й получи в подарок\n\n"
+            "➡️ Нажми «Тарифы» чтобы начать"
         )
     else:
         next_free = 3 - (count % 3)
@@ -408,10 +421,10 @@ async def show_promo_callback(callback: types.CallbackQuery):
             next_free = 3
         
         text = (
-            "🎁 Акция\n\n"
-            f"Куплено Премиум: {count}\n"
-            f"Осталось оплатить: {next_free} до бесплатного месяца\n\n"
-            "Нажми «Тарифы» чтобы купить"
+            "🎁 **Акция**\n\n"
+            f"📊 Куплено Премиум: {count}\n"
+            f"🎯 Осталось оплатить: {next_free} до бесплатного месяца\n\n"
+            "➡️ Нажми «Тарифы» чтобы купить"
         )
     
     await callback.message.edit_text(text, parse_mode="Markdown")
@@ -420,20 +433,21 @@ async def show_promo_callback(callback: types.CallbackQuery):
 @dp.callback_query(F.data == "show_tariffs")
 async def show_tariffs(callback: types.CallbackQuery):
     await callback.message.edit_text(
-        "💎 Тарифы\n\n"
-        "📱 Бесплатный — 0 ₽\n"
+        "💎 **Тарифы**\n\n"
+        "📱 **Бесплатный** — 0 ₽\n"
         "   • 3 скачивания в день\n"
         "   • TikTok, Instagram, Pinterest\n"
         "   • SD (480p)\n\n"
-        "⚡ Стандарт — 100 ₽/мес\n"
+        "⚡ **Стандарт** — 100 ₽/мес\n"
         "   • 30 скачиваний в день\n"
         "   • TikTok, Instagram, Pinterest, Twitter, Facebook\n"
         "   • HD (720p)\n\n"
-        "💎 Премиум — 300 ₽/мес\n"
-        "   • Безлимит\n"
+        "💎 **Премиум** — 300 ₽/мес\n"
+        "   • ♾️ Безлимит\n"
         "   • Все платформы\n"
         "   • Full HD (1080p)\n"
-        "   • Умный кэш\n\n"
+        "   • ✂️ Обрезка видео по времени\n"
+        "   • ⚡ Умный кэш\n\n"
         "🎁 Каждый 3-й Премиум — бесплатно",
         parse_mode="Markdown",
         reply_markup=get_tariff_keyboard()
@@ -451,17 +465,17 @@ async def my_stats_callback(callback: types.CallbackQuery):
     
     if stats:
         text = (
-            "📊 Статистика\n\n"
-            f"Сегодня: {stats['downloads_today']}\n"
-            f"Всего: {stats['total_downloads']}\n"
-            f"Тариф: {tariff_info['name']}\n"
-            f"Статус: {'Активна' if stats['is_subscribed'] == 1 else 'Не активна'}\n"
-            f"Действует до: {stats['sub_end_date'] or 'Нет'}\n\n"
-            f"Рефералов: {referral_info['count']}\n"
-            f"Куплено Премиум: {premium_count}"
+            "📊 **Статистика**\n\n"
+            f"📥 Сегодня: {stats['downloads_today']}\n"
+            f"📦 Всего: {stats['total_downloads']}\n"
+            f"💎 Тариф: {tariff_info['name']}\n"
+            f"📊 Статус: {'🟢 Активна' if stats['is_subscribed'] == 1 else '🔴 Не активна'}\n"
+            f"📅 Действует до: {stats['sub_end_date'] or 'Нет'}\n\n"
+            f"🎁 Рефералов: {referral_info['count']}\n"
+            f"🎉 Куплено Премиум: {premium_count}"
         )
     else:
-        text = "Не удалось получить данные"
+        text = "❌ Не удалось получить данные"
     
     await callback.message.edit_text(text, parse_mode="Markdown", reply_markup=get_user_stats_keyboard())
     await callback.answer()
@@ -480,10 +494,10 @@ async def process_user_message_to_admin(message: types.Message, state: FSMContex
     user_name = message.from_user.full_name or "Пользователь"
     
     text = (
-        f"💬 Сообщение от пользователя\n\n"
+        f"💬 **Сообщение от пользователя**\n\n"
         f"👤 {user_name}\n"
         f"🆔 `{user_id}`\n\n"
-        f"{message.text}"
+        f"📝 {message.text}"
     )
     
     if message.photo:
@@ -495,18 +509,19 @@ async def process_user_message_to_admin(message: types.Message, state: FSMContex
     else:
         await bot.send_message(ADMIN_ID, text, parse_mode="Markdown")
     
-    await message.answer("Сообщение отправлено администратору")
+    await message.answer("✅ Сообщение отправлено администратору")
     await state.clear()
 
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
-        await message.answer("Нет прав")
+        await message.answer("⛔ Нет прав")
         return
     
     await state.clear()
     await message.answer(
-        "👑 Админ-панель",
+        "👑 **Админ-панель**\n\n"
+        "Выберите действие:",
         reply_markup=get_admin_keyboard(),
         parse_mode="Markdown"
     )
@@ -521,13 +536,13 @@ async def process_admin_callbacks(callback: types.CallbackQuery, state: FSMConte
     if action == "stats":
         stats = await get_admin_stats()
         text = (
-            "📊 Статистика\n\n"
-            f"Пользователей: {stats['total_users']}\n"
-            f"Подписок: {stats['active_subs']}\n"
-            f"Скачиваний: {stats['total_downloads']}\n\n"
-            f"Бесплатный: {stats.get('free_users', 0)}\n"
-            f"Стандарт: {stats.get('standard_users', 0)}\n"
-            f"Премиум: {stats.get('premium_users', 0)}"
+            "📊 **Статистика**\n\n"
+            f"👥 Пользователей: {stats['total_users']}\n"
+            f"💎 Подписок: {stats['active_subs']}\n"
+            f"📥 Скачиваний: {stats['total_downloads']}\n\n"
+            f"📱 Бесплатный: {stats.get('free_users', 0)}\n"
+            f"⚡ Стандарт: {stats.get('standard_users', 0)}\n"
+            f"💎 Премиум: {stats.get('premium_users', 0)}"
         )
         await callback.message.edit_text(text, reply_markup=get_admin_keyboard(), parse_mode="Markdown")
 
@@ -536,15 +551,41 @@ async def process_admin_callbacks(callback: types.CallbackQuery, state: FSMConte
         await state.set_state(AdminState.waiting_for_broadcast_msg)
 
     elif action == "give":
-        await callback.message.answer("🎁 Отправь: `ID тариф`")
+        await callback.message.answer("🎁 Отправь: `ID тариф`\n\nПример: `123456789 premium`")
         await state.set_state(AdminState.waiting_for_give_sub_id)
 
     elif action == "revoke":
-        await callback.message.answer("❌ Отправь ID пользователя:")
+        await callback.message.answer("❌ Отправь ID пользователя:\n\nПример: `123456789`")
         await state.set_state(AdminState.waiting_for_revoke_sub_id)
 
+    elif action == "users":
+        users = await get_all_users()
+        text = f"👥 **Все пользователи**\n\nВсего: {len(users)}\n\n"
+        # Показываем первых 20
+        for i, uid in enumerate(users[:20], 1):
+            text += f"{i}. `{uid}`\n"
+        if len(users) > 20:
+            text += f"\n... и ещё {len(users) - 20} пользователей"
+        await callback.message.edit_text(text, reply_markup=get_admin_keyboard(), parse_mode="Markdown")
+
+    elif action == "top":
+        top_users = await get_top_users(10)
+        text = "🏆 **Топ пользователей по скачиваниям**\n\n"
+        for i, user in enumerate(top_users, 1):
+            text += f"{i}. `{user['user_id']}` — {user['total_downloads']} скачиваний\n"
+        await callback.message.edit_text(text, reply_markup=get_admin_keyboard(), parse_mode="Markdown")
+
+    elif action == "cleanup":
+        await callback.message.answer("🧹 Очищаю неактивных пользователей...")
+        count = await cleanup_inactive_users()
+        await callback.message.edit_text(
+            f"🧹 **Очистка завершена**\n\nУдалено неактивных пользователей: {count}",
+            reply_markup=get_admin_keyboard(),
+            parse_mode="Markdown"
+        )
+
     elif action == "answer":
-        await callback.message.answer("💬 Напиши: `user_id|сообщение`")
+        await callback.message.answer("💬 Напиши: `user_id|сообщение`\n\nПример: `123456789|Привет!`")
         await state.set_state(AdminState.waiting_for_answer_to_user)
 
     elif action == "export":
@@ -553,7 +594,7 @@ async def process_admin_callbacks(callback: types.CallbackQuery, state: FSMConte
 
     elif action == "cancel":
         await state.clear()
-        await callback.message.edit_text("Отменено", reply_markup=get_admin_keyboard())
+        await callback.message.edit_text("🔄 Отменено", reply_markup=get_admin_keyboard())
         
     await callback.answer()
 
@@ -565,7 +606,7 @@ async def process_broadcast(message: types.Message, state: FSMContext):
     users = await get_all_users()
     success_count = 0
     
-    await message.answer(f"Начинаю рассылку для {len(users)} пользователей...")
+    await message.answer(f"⏳ Начинаю рассылку для {len(users)} пользователей...")
     
     for user_id in users:
         try:
@@ -575,7 +616,7 @@ async def process_broadcast(message: types.Message, state: FSMContext):
         except Exception:
             pass
             
-    await message.answer(f"Рассылка завершена! Успешно: {success_count} из {len(users)}")
+    await message.answer(f"✅ Рассылка завершена!\n\nУспешно: {success_count} из {len(users)}")
     await state.clear()
 
 @dp.message(AdminState.waiting_for_give_sub_id)
@@ -585,7 +626,7 @@ async def process_give_sub(message: types.Message, state: FSMContext):
     
     parts = message.text.split()
     if len(parts) < 2:
-        await message.answer("Формат: `ID тариф`")
+        await message.answer("❌ Формат: `ID тариф`\n\nПример: `123456789 premium`")
         return
     
     try:
@@ -593,13 +634,13 @@ async def process_give_sub(message: types.Message, state: FSMContext):
         tariff_key = parts[1] if len(parts) > 1 else "standard"
         
         if tariff_key not in ["standard", "premium"]:
-            await message.answer("Тариф: standard или premium")
+            await message.answer("❌ Тариф: standard или premium")
             return
         
         await grant_sub_by_admin(target_id, tariff_key)
-        await message.answer(f"Пользователю `{target_id}` выдан тариф `{tariff_key}`")
+        await message.answer(f"✅ Пользователю `{target_id}` выдан тариф `{tariff_key}`")
     except ValueError:
-        await message.answer("ID должен быть числом")
+        await message.answer("❌ ID должен быть числом")
     
     await state.clear()
 
@@ -609,12 +650,12 @@ async def process_revoke_sub(message: types.Message, state: FSMContext):
         return
         
     if not message.text.isdigit():
-        await message.answer("ID должен состоять только из цифр")
+        await message.answer("❌ ID должен состоять только из цифр")
         return
         
     target_id = int(message.text)
     await revoke_sub_by_admin(target_id)
-    await message.answer(f"У пользователя `{target_id}` забрали подписку", parse_mode="Markdown")
+    await message.answer(f"❌ У пользователя `{target_id}` забрали подписку", parse_mode="Markdown")
     await state.clear()
 
 @dp.message(AdminState.waiting_for_answer_to_user)
@@ -624,7 +665,7 @@ async def process_answer_to_user(message: types.Message, state: FSMContext):
     
     text = message.text
     if "|" not in text:
-        await message.answer("Формат: `user_id|сообщение`")
+        await message.answer("❌ Формат: `user_id|сообщение`\n\nПример: `123456789|Привет!`")
         return
     
     try:
@@ -633,16 +674,16 @@ async def process_answer_to_user(message: types.Message, state: FSMContext):
         answer_text = answer_text.strip()
         
         if not answer_text:
-            await message.answer("Текст не может быть пустым")
+            await message.answer("❌ Текст не может быть пустым")
             return
         
         await bot.send_message(
             user_id,
-            f"💬 Ответ от администратора:\n\n{answer_text}"
+            f"💬 **Ответ от администратора:**\n\n{answer_text}"
         )
-        await message.answer(f"Ответ отправлен пользователю `{user_id}`")
+        await message.answer(f"✅ Ответ отправлен пользователю `{user_id}`")
     except ValueError:
-        await message.answer("ID должен быть числом")
+        await message.answer("❌ ID должен быть числом")
     
     await state.clear()
 
@@ -675,13 +716,13 @@ async def export_database(message: types.Message):
         with open(filename, "rb") as f:
             await message.answer_document(
                 FSInputFile(filename),
-                caption=f"Экспорт базы данных\nВсего: {len(users)} пользователей"
+                caption=f"📦 Экспорт базы данных\n\nВсего: {len(users)} пользователей"
             )
         
         os.remove(filename)
         
     except Exception as e:
-        await message.answer(f"Ошибка: {str(e)}")
+        await message.answer(f"❌ Ошибка: {str(e)}")
 
 # ==========================================
 # ТАРИФЫ И ОПЛАТА
@@ -693,9 +734,10 @@ async def process_tariff_selection(callback: types.CallbackQuery):
     
     if tariff_key == "free":
         await callback.message.edit_text(
-            "Бесплатный тариф активен\n\n"
+            "📱 **Бесплатный тариф активен**\n\n"
             "3 скачивания в день\n"
-            "TikTok, Instagram, Pinterest",
+            "TikTok, Instagram, Pinterest\n"
+            "SD качество (480p)",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
@@ -704,16 +746,15 @@ async def process_tariff_selection(callback: types.CallbackQuery):
     
     tariff = TARIFFS.get(tariff_key)
     if not tariff:
-        await callback.answer("Тариф не найден")
+        await callback.answer("❌ Тариф не найден")
         return
     
     await callback.message.edit_text(
-        f"💎 Тариф «{tariff['name']}»\n\n"
-        f"Цена: {tariff['price']} ₽\n"
-        f"Лимит: {tariff['daily_limit']} скачиваний/день\n"
-        f"Платформы: {', '.join(tariff['platforms']) if tariff['platforms'] != ['all'] else 'Все'}\n\n"
-        f"🎁 Каждый 3-й Премиум — бесплатно\n"
-        f"{'🎁 +3 дня бонусом при оплате картой' if tariff_key == 'premium' else ''}",
+        f"💎 **Тариф «{tariff['name']}»**\n\n"
+        f"💰 Цена: {tariff['price']} ₽\n"
+        f"📊 Лимит: {tariff['daily_limit']} скачиваний/день\n"
+        f"🌐 Платформы: {', '.join(tariff['platforms']) if tariff['platforms'] != ['all'] else 'Все'}\n\n"
+        f"🎁 Каждый 3-й Премиум — бесплатно",
         parse_mode="Markdown",
         reply_markup=get_payment_keyboard(tariff_key)
     )
@@ -725,7 +766,7 @@ async def process_pay_stars(callback: types.CallbackQuery):
     tariff = TARIFFS.get(tariff_key)
     
     if not tariff:
-        await callback.answer("Тариф не найден")
+        await callback.answer("❌ Тариф не найден")
         return
     
     price = tariff["price"]
@@ -749,7 +790,7 @@ async def process_pay_card(callback: types.CallbackQuery):
     tariff = TARIFFS.get(tariff_key)
     
     if not tariff:
-        await callback.answer("Тариф не найден")
+        await callback.answer("❌ Тариф не найден")
         return
     
     payment_label = f"card_{tariff_key}_{user_id}_{int(datetime.now().timestamp())}"
@@ -757,19 +798,16 @@ async def process_pay_card(callback: types.CallbackQuery):
     
     payment_link = f"https://yoomoney.ru/quickpay/confirm.xml?receiver={YOOMONEY_SHOP_ID}&quickpay-form=shop&targets=Подписка+{tariff['name']}&paymentType=SB&sum={tariff['price']}&label={payment_label}"
     
-    bonus_text = "\n\nБонус: +3 дня к подписке" if tariff_key == "premium" else ""
-    
     await callback.message.edit_text(
-        f"💳 Оплата через карту\n\n"
-        f"Тариф: {tariff['name']}\n"
-        f"Сумма: {tariff['price']} ₽\n"
-        f"{bonus_text}\n\n"
-        f"Ссылка для оплаты:\n`{payment_link}`\n\n"
-        "После оплаты подписка активируется автоматически",
+        f"💳 **Оплата через карту**\n\n"
+        f"💎 Тариф: {tariff['name']}\n"
+        f"💰 Сумма: {tariff['price']} ₽\n\n"
+        f"🔗 Ссылка для оплаты:\n`{payment_link}`\n\n"
+        "📌 После оплаты подписка активируется автоматически",
         parse_mode="Markdown",
         reply_markup=InlineKeyboardMarkup(inline_keyboard=[
-            [InlineKeyboardButton(text="Перейти к оплате", url=payment_link)],
-            [InlineKeyboardButton(text="Главное меню", callback_data="main_menu")]
+            [InlineKeyboardButton(text="🔗 Перейти к оплате", url=payment_link)],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
         ])
     )
     await callback.answer()
@@ -797,17 +835,17 @@ async def process_successful_payment(message: types.Message):
             await activate_free_premium(user_id)
             
             await message.answer(
-                "Поздравляю!\n\n"
+                "🎉 **Поздравляю!**\n\n"
                 "Ты оплатил 2 Премиума, 3-й месяц — бесплатно\n\n"
-                "Тариф «Премиум» активирован на 30 дней",
+                "💎 Тариф «Премиум» активирован на 30 дней",
                 parse_mode="Markdown"
             )
             
             await bot.send_message(
                 ADMIN_ID,
-                f"🎁 Акция активирована!\n\n"
-                f"Пользователь `{user_id}` получил бесплатный Премиум\n"
-                f"Это его 3-й Премиум (2 оплаченных + 1 бесплатный)",
+                f"🎁 **Акция активирована!**\n\n"
+                f"👤 Пользователь `{user_id}` получил бесплатный Премиум\n"
+                f"📊 Это его 3-й Премиум (2 оплаченных + 1 бесплатный)",
                 parse_mode="Markdown"
             )
             return
@@ -822,16 +860,16 @@ async def process_successful_payment(message: types.Message):
             next_free = 3
         
         await message.answer(
-            f"Оплата прошла успешно\n\n"
-            f"Тариф «{tariff['name']}» активирован на 30 дней\n\n"
-            f"До бесплатного месяца осталось оплатить: {next_free} Премиум(а)",
+            f"✅ **Оплата прошла успешно**\n\n"
+            f"💎 Тариф «{tariff['name']}» активирован на 30 дней\n\n"
+            f"🎯 До бесплатного месяца осталось оплатить: {next_free} Премиум(а)",
             parse_mode="Markdown"
         )
     else:
         await message.answer(
-            f"Оплата прошла успешно\n\n"
-            f"Тариф «{tariff['name']}» активирован на 30 дней\n\n"
-            "Переходи на Премиум — каждый 3-й месяц бесплатно",
+            f"✅ **Оплата прошла успешно**\n\n"
+            f"📊 Тариф «{tariff['name']}» активирован на 30 дней\n\n"
+            "💡 Переходи на Премиум — каждый 3-й месяц бесплатно",
             parse_mode="Markdown"
         )
 
@@ -844,17 +882,16 @@ async def handle_link(message: types.Message):
     user_id = message.from_user.id
     url = message.text.strip()
     
-    # Проверка на пустую ссылку
     if not url or len(url) < 10:
-        await message.answer("Ссылка слишком короткая. Проверь и попробуй снова")
+        await message.answer("❌ Ссылка слишком короткая. Проверь и попробуй снова")
         return
     
-    info_msg = await message.answer("Получаю информацию о видео...", parse_mode="Markdown")
+    info_msg = await message.answer("🔍 Получаю информацию о видео...", parse_mode="Markdown")
     video_info = await get_video_info(url)
     
     if not video_info or video_info.get("platform") == "unknown":
         await info_msg.edit_text(
-            "Не удалось определить платформу\n\n"
+            "❌ **Не удалось определить платформу**\n\n"
             "Проверь ссылку. Поддерживаются:\n"
             "TikTok, Instagram, YouTube, Pinterest, Twitter/X, Facebook, Reddit, Vimeo, Telegram, VK, Rutube, Twitch, Dailymotion и другие",
             parse_mode="Markdown"
@@ -879,20 +916,26 @@ async def handle_link(message: types.Message):
         sizes_text += f"   • {quality_names.get(q, q)}: ~{size_mb} МБ\n"
     
     preview_text = (
-        "📹 Информация о видео\n\n"
-        f"Название: {video_info['title']}\n"
-        f"Длительность: {video_info['duration_str']}\n"
-        f"Платформа: {video_info['platform'].capitalize()}\n"
-        f"Размер файла:\n{sizes_text}\n"
-        f"Ваш тариф: {tariff_info['name']}\n\n"
-        "Выберите качество:"
+        "📹 **Информация о видео**\n\n"
+        f"📌 Название: {video_info['title']}\n"
+        f"⏱ Длительность: {video_info['duration_str']}\n"
+        f"📱 Платформа: {video_info['platform'].capitalize()}\n"
+        f"📦 Размер файла:\n{sizes_text}\n"
+        f"💎 Ваш тариф: {tariff_info['name']}\n\n"
+        "⬇️ **Выберите действие:**"
     )
+    
+    is_premium = tariff_key == "premium"
     
     await info_msg.edit_text(
         preview_text,
         parse_mode="Markdown",
-        reply_markup=get_quality_keyboard(available_qualities, url)
+        reply_markup=get_quality_keyboard(available_qualities, url, is_premium)
     )
+
+# ==========================================
+# ОБРАБОТЧИК ВЫБОРА КАЧЕСТВА
+# ==========================================
 
 @dp.callback_query(F.data.startswith("dl_"))
 async def process_download_quality(callback: types.CallbackQuery):
@@ -903,7 +946,7 @@ async def process_download_quality(callback: types.CallbackQuery):
     
     parts = data.split("_", 1)
     if len(parts) < 2:
-        await callback.answer("Ошибка формата")
+        await callback.answer("❌ Ошибка формата")
         return
     
     quality = parts[0]
@@ -912,12 +955,12 @@ async def process_download_quality(callback: types.CallbackQuery):
     url = download_cache.get(url_hash)
     if not url:
         await callback.message.answer(
-            "Ссылка устарела. Отправь видео заново",
+            "❌ Ссылка устарела. Отправь видео заново",
             parse_mode="Markdown"
         )
         return
     
-    await callback.answer(f"Начинаю скачивание в {quality.upper()}...")
+    await callback.answer(f"⏳ Начинаю скачивание в {quality.upper()}...")
     
     tariff_key = await get_user_tariff(user_id)
     
@@ -929,7 +972,7 @@ async def process_download_quality(callback: types.CallbackQuery):
     
     if quality not in available:
         await callback.message.answer(
-            f"Качество {quality.upper()} недоступно для твоего тарифа\n"
+            f"❌ Качество {quality.upper()} недоступно для твоего тарифа\n"
             f"Доступно: {', '.join(available).upper()}",
             parse_mode="Markdown"
         )
@@ -937,10 +980,9 @@ async def process_download_quality(callback: types.CallbackQuery):
     
     platform = detect_platform(url)
     
-    # Проверка платформы
     if platform == "unknown":
         await callback.message.answer(
-            "Не удалось определить платформу. Проверь ссылку",
+            "❌ Не удалось определить платформу. Проверь ссылку",
             parse_mode="Markdown"
         )
         return
@@ -954,7 +996,7 @@ async def process_download_quality(callback: types.CallbackQuery):
         )
         return
     
-    status_msg = await callback.message.answer("Скачиваю...", parse_mode="Markdown")
+    status_msg = await callback.message.answer("⏳ Скачиваю...", parse_mode="Markdown")
     
     file_path = f"temp_{user_id}_{int(datetime.now().timestamp())}.mp4"
     
@@ -964,15 +1006,192 @@ async def process_download_quality(callback: types.CallbackQuery):
             video_file = FSInputFile(file_path)
             await callback.message.answer_video(
                 video=video_file,
-                caption=f"Готово!\n{platform.capitalize()}\nКачество: {quality.upper()}",
+                caption=f"✅ Готово!\n📱 {platform.capitalize()}\n🎬 Качество: {quality.upper()}",
                 reply_markup=get_main_keyboard()
             )
             await increment_downloads(user_id)
         else:
             await callback.message.answer(
-                "Не удалось скачать видео. Проверь ссылку или попробуй другую",
+                "❌ Не удалось скачать видео. Проверь ссылку или попробуй другую",
                 reply_markup=get_main_keyboard(),
                 parse_mode="Markdown"
+            )
+    finally:
+        await status_msg.delete()
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+# ==========================================
+# 🎵 ОБРАБОТЧИК СКАЧИВАНИЯ АУДИО
+# ==========================================
+
+@dp.callback_query(F.data.startswith("audio_"))
+async def process_audio_download(callback: types.CallbackQuery):
+    global download_cache
+    
+    user_id = callback.from_user.id
+    url_hash = callback.data.replace("audio_", "")
+    url = download_cache.get(url_hash)
+    
+    if not url:
+        await callback.message.answer(
+            "❌ Ссылка устарела. Отправь видео заново",
+            parse_mode="Markdown"
+        )
+        return
+    
+    await callback.answer("🎵 Скачиваю аудио...")
+    
+    status_msg = await callback.message.answer("⏳ Скачиваю аудио...", parse_mode="Markdown")
+    
+    file_path = f"temp_{user_id}_{int(datetime.now().timestamp())}.mp3"
+    
+    try:
+        success = await download_audio(url, file_path)
+        if success:
+            audio_file = FSInputFile(file_path)
+            await callback.message.answer_audio(
+                audio=audio_file,
+                caption="🎵 Готово!",
+                reply_markup=get_main_keyboard()
+            )
+            await increment_downloads(user_id)
+        else:
+            await callback.message.answer(
+                "❌ Не удалось скачать аудио",
+                reply_markup=get_main_keyboard()
+            )
+    finally:
+        await status_msg.delete()
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+# ==========================================
+# ✂️ ОБРАБОТЧИК ОБРЕЗКИ ВИДЕО (ТОЛЬКО ПРЕМИУМ)
+# ==========================================
+
+@dp.callback_query(F.data.startswith("cut_"))
+async def process_cut_request(callback: types.CallbackQuery, state: FSMContext):
+    global download_cache
+    
+    user_id = callback.from_user.id
+    
+    tariff_key = await get_user_tariff(user_id)
+    if tariff_key != "premium":
+        await callback.message.answer(
+            "❌ Обрезка видео доступна только на тарифе Премиум\n\n"
+            "💎 /tariff — выбрать тариф",
+            parse_mode="Markdown"
+        )
+        return
+    
+    url_hash = callback.data.replace("cut_", "")
+    url = download_cache.get(url_hash)
+    
+    if not url:
+        await callback.message.answer(
+            "❌ Ссылка устарела. Отправь видео заново",
+            parse_mode="Markdown"
+        )
+        return
+    
+    await state.update_data(url=url, url_hash=url_hash)
+    
+    await callback.message.answer(
+        "✂️ **Обрезка видео**\n\n"
+        "Введи время начала в формате:\n"
+        "• `MM:SS` — например `01:30`\n"
+        "• `HH:MM:SS` — например `00:01:30`\n\n"
+        "Или отправь `0` чтобы начать с начала",
+        parse_mode="Markdown"
+    )
+    await state.set_state(DownloadState.waiting_for_cut_start)
+    await callback.answer()
+
+@dp.message(DownloadState.waiting_for_cut_start)
+async def process_cut_start(message: types.Message, state: FSMContext):
+    start_time = message.text.strip()
+    
+    if start_time == "0":
+        start_time = None
+    elif not re.match(r'^(\d{1,2}:\d{2}(:\d{2})?)$', start_time):
+        await message.answer(
+            "❌ Неверный формат. Используй:\n"
+            "• `MM:SS` — 01:30\n"
+            "• `HH:MM:SS` — 00:01:30\n\n"
+            "Или отправь `0` чтобы начать с начала",
+            parse_mode="Markdown"
+        )
+        return
+    
+    await state.update_data(start_time=start_time)
+    await message.answer(
+        "✂️ **Введи время окончания**\n\n"
+        "Введи время конца в формате:\n"
+        "• `MM:SS` — например `02:30`\n"
+        "• `HH:MM:SS` — например `00:02:30`\n\n"
+        "Или отправь `0` чтобы скачать до конца",
+        parse_mode="Markdown"
+    )
+    await state.set_state(DownloadState.waiting_for_cut_end)
+
+@dp.message(DownloadState.waiting_for_cut_end)
+async def process_cut_end(message: types.Message, state: FSMContext):
+    end_time = message.text.strip()
+    data = await state.get_data()
+    
+    if end_time == "0":
+        end_time = None
+    elif not re.match(r'^(\d{1,2}:\d{2}(:\d{2})?)$', end_time):
+        await message.answer(
+            "❌ Неверный формат. Используй:\n"
+            "• `MM:SS` — 02:30\n"
+            "• `HH:MM:SS` — 00:02:30\n\n"
+            "Или отправь `0` чтобы скачать до конца",
+            parse_mode="Markdown"
+        )
+        return
+    
+    url = data.get('url')
+    start_time = data.get('start_time')
+    
+    if not url:
+        await message.answer("❌ Ссылка устарела. Отправь видео заново")
+        await state.clear()
+        return
+    
+    await state.clear()
+    
+    status_msg = await message.answer("⏳ Скачиваю и обрезаю видео...", parse_mode="Markdown")
+    
+    file_path = f"temp_{message.from_user.id}_{int(datetime.now().timestamp())}.mp4"
+    
+    try:
+        # Используем функцию обрезки из downloader
+        from downloader import download_media_with_cut
+        success = await download_media_with_cut(url, file_path, start_time, end_time)
+        
+        if success:
+            video_file = FSInputFile(file_path)
+            time_text = ""
+            if start_time and end_time:
+                time_text = f" (с {start_time} по {end_time})"
+            elif start_time:
+                time_text = f" (с {start_time})"
+            elif end_time:
+                time_text = f" (до {end_time})"
+            
+            await message.answer_video(
+                video=video_file,
+                caption=f"✅ Готово!{time_text}\n✂️ Обрезано",
+                reply_markup=get_main_keyboard()
+            )
+            await increment_downloads(message.from_user.id)
+        else:
+            await message.answer(
+                "❌ Не удалось скачать или обрезать видео.\n"
+                "Проверь время или попробуй другую ссылку",
+                reply_markup=get_main_keyboard()
             )
     finally:
         await status_msg.delete()
@@ -986,7 +1205,7 @@ async def process_download_quality(callback: types.CallbackQuery):
 @dp.message(F.text)
 async def handle_unknown(message: types.Message):
     await message.answer(
-        "Отправь ссылку на видео\n\n"
+        "📌 Отправь ссылку на видео\n\n"
         "Поддерживаются: TikTok, Instagram, YouTube, Pinterest, Twitter/X, Facebook и другие",
         reply_markup=get_main_keyboard(),
         parse_mode="Markdown"
@@ -1030,17 +1249,17 @@ async def yoomoney_webhook(request):
                     
                     await bot.send_message(
                         user_id,
-                        "Поздравляю!\n\n"
+                        "🎉 **Поздравляю!**\n\n"
                         "Ты оплатил 2 Премиума через карту, 3-й месяц — бесплатно\n\n"
-                        "Тариф «Премиум» активирован на 30 дней",
+                        "💎 Тариф «Премиум» активирован на 30 дней",
                         parse_mode="Markdown"
                     )
                     
                     await bot.send_message(
                         ADMIN_ID,
-                        f"🎁 Акция активирована через карту!\n\n"
-                        f"Пользователь `{user_id}` получил бесплатный Премиум\n"
-                        f"Это его 3-й Премиум (2 оплаченных + 1 бесплатный)",
+                        f"🎁 **Акция активирована через карту!**\n\n"
+                        f"👤 Пользователь `{user_id}` получил бесплатный Премиум\n"
+                        f"📊 Это его 3-й Премиум (2 оплаченных + 1 бесплатный)",
                         parse_mode="Markdown"
                     )
                     
@@ -1052,21 +1271,19 @@ async def yoomoney_webhook(request):
             
             tariff = TARIFFS.get(tariff_key, TARIFFS["standard"])
             
-            bonus_text = "\nБонус: +3 дня к подписке" if tariff_key == "premium" else ""
-            
             await bot.send_message(
                 user_id,
-                f"Оплата через карту прошла успешно\n\n"
-                f"Тариф «{tariff['name']}» активирован на 30 дней{bonus_text}",
+                f"✅ **Оплата через карту прошла успешно**\n\n"
+                f"💎 Тариф «{tariff['name']}» активирован на 30 дней",
                 parse_mode="Markdown"
             )
             
             await bot.send_message(
                 ADMIN_ID,
-                f"💳 Оплата через ЮMoney\n\n"
-                f"Пользователь: `{user_id}`\n"
-                f"Тариф: {tariff_key}\n"
-                f"Сумма: {amount} ₽",
+                f"💳 **Оплата через ЮMoney**\n\n"
+                f"👤 Пользователь: `{user_id}`\n"
+                f"💎 Тариф: {tariff_key}\n"
+                f"💰 Сумма: {amount} ₽",
                 parse_mode="Markdown"
             )
         
@@ -1090,17 +1307,17 @@ async def check_subscriptions():
                     
                     if tariff == "premium":
                         msg = (
-                            f"Привет!\n\n"
+                            f"👋 Привет!\n\n"
                             f"Твой Премиум заканчивается через 3 дня\n"
-                            f"Последний день: {user['sub_end_date']}\n\n"
+                            f"📅 Последний день: {user['sub_end_date']}\n\n"
                             f"Чтобы сохранить безлимит — продли подписку\n"
                             f"/tariff"
                         )
                     else:
                         msg = (
-                            f"Привет!\n\n"
+                            f"👋 Привет!\n\n"
                             f"Твой Стандарт заканчивается через 3 дня\n"
-                            f"Последний день: {user['sub_end_date']}\n\n"
+                            f"📅 Последний день: {user['sub_end_date']}\n\n"
                             f"Чтобы продолжить скачивать без ограничений — продли подписку\n"
                             f"/tariff"
                         )
@@ -1117,15 +1334,15 @@ async def check_subscriptions():
                     
                     if tariff == "premium":
                         msg = (
-                            f"Напоминаю, что завтра заканчивается Премиум\n\n"
-                            f"Последний день: {user['sub_end_date']}\n\n"
+                            f"⏰ Напоминаю, что завтра заканчивается Премиум\n\n"
+                            f"📅 Последний день: {user['sub_end_date']}\n\n"
                             f"Чтобы сохранить безлимит — продли через /tariff\n"
                             f"Если нет — перейдёшь на Бесплатный тариф (3 видео в день)"
                         )
                     else:
                         msg = (
-                            f"Напоминаю, что завтра заканчивается Стандарт\n\n"
-                            f"Последний день: {user['sub_end_date']}\n\n"
+                            f"⏰ Напоминаю, что завтра заканчивается Стандарт\n\n"
+                            f"📅 Последний день: {user['sub_end_date']}\n\n"
                             f"Чтобы сохранить 30 скачиваний в день — продли через /tariff\n"
                             f"Если нет — перейдёшь на Бесплатный тариф (3 видео в день)"
                         )
@@ -1142,15 +1359,15 @@ async def check_subscriptions():
                     
                     if tariff == "premium":
                         msg = (
-                            f"Сегодня последний день Премиума\n\n"
-                            f"Заканчивается сегодня: {user['sub_end_date']}\n\n"
+                            f"👋 Сегодня последний день Премиума\n\n"
+                            f"📅 Заканчивается сегодня: {user['sub_end_date']}\n\n"
                             f"Чтобы остаться с безлимитом — продли через /tariff\n"
                             f"Если нет — перейдёшь на Бесплатный тариф (3 видео в день)"
                         )
                     else:
                         msg = (
-                            f"Сегодня последний день Стандарта\n\n"
-                            f"Заканчивается сегодня: {user['sub_end_date']}\n\n"
+                            f"👋 Сегодня последний день Стандарта\n\n"
+                            f"📅 Заканчивается сегодня: {user['sub_end_date']}\n\n"
                             f"Чтобы остаться с 30 скачиваниями в день — продли через /tariff\n"
                             f"Если нет — перейдёшь на Бесплатный тариф (3 видео в день)"
                         )
@@ -1194,7 +1411,7 @@ async def main():
     await init_db()
     asyncio.create_task(start_dummy_server())
     asyncio.create_task(check_subscriptions())
-    print("Бот успешно запущен")
+    print("🤖 Бот успешно запущен")
     await dp.start_polling(bot)
 
 if __name__ == "__main__":
