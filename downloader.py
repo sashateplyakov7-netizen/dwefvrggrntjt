@@ -8,6 +8,28 @@ from urllib.parse import urlparse, parse_qs
 from config import MAX_FILE_SIZE, SUPPORTED_PLATFORMS
 
 # ==========================================
+# КУКИ — АВТОМАТИЧЕСКИ ПОДГРУЖАЮТСЯ
+# ==========================================
+COOKIES_FILE = "cookies.txt" if os.path.exists("cookies.txt") else None
+
+if COOKIES_FILE:
+    print(f"🍪 Куки загружены: {COOKIES_FILE}")
+else:
+    print("⚠️ cookies.txt не найден. YouTube может не работать.")
+
+# ==========================================
+# СПИСОК USER-AGENT ДЛЯ РОТАЦИИ
+# ==========================================
+USER_AGENTS = [
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/121.0',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Safari/605.1.15',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.1 Mobile/15E148 Safari/604.1',
+]
+
+# ==========================================
 # ОПРЕДЕЛЕНИЕ ПЛАТФОРМЫ ПО ССЫЛКЕ
 # ==========================================
 def detect_platform(url: str) -> str:
@@ -31,116 +53,122 @@ def _sync_download(url: str, output_path: str) -> bool:
         'noplaylist': True,
         'max_filesize': MAX_FILE_SIZE,
         'concurrent_fragment_downloads': 5,
-        'socket_timeout': 10,
+        'socket_timeout': 30,
     }
     
     # 🔥 ОПЦИИ ДЛЯ КОНКРЕТНЫХ ПЛАТФОРМ
     if platform == "tiktok.com":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'cookiesfrombrowser': ('chrome',),
         })
     
     elif platform in ["instagram.com", "facebook.com"]:
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform in ["youtube.com", "youtu.be"]:
         ydl_opts.update({
             'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
-            'cookiesfrombrowser': ('chrome',),
+            'user_agent': random.choice(USER_AGENTS),
             'http_headers': {
                 'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
                 'Accept-Encoding': 'gzip, deflate, br',
-                'Accept-Language': 'en-US,en;q=0.5',
+                'Accept-Language': 'en-US,en;q=0.9',
                 'Connection': 'keep-alive',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
             }
         })
+        # 🔥 КУКИ ТОЛЬКО ДЛЯ YOUTUBE
+        if COOKIES_FILE:
+            ydl_opts['cookiefile'] = COOKIES_FILE
     
     elif platform == "pinterest.com":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform in ["twitter.com", "x.com"]:
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'cookiesfrombrowser': ('chrome',),
         })
     
     elif platform in ["reddit.com", "vimeo.com"]:
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "t.me":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
-    # 🌍 НОВЫЕ ПЛАТФОРМЫ
     elif platform in ["vk.com", "vkontakte.ru"]:
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'cookiesfrombrowser': ('chrome',),
+            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "likee.com":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "rutube.ru":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "twitch.tv":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'cookiesfrombrowser': ('chrome',),
         })
     
     elif platform == "coub.com":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "tumblr.com":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "dailymotion.com":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
     elif platform == "9gag.com":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
-            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'user_agent': random.choice(USER_AGENTS),
         })
     
-    # 🔥 УНИВЕРСАЛЬНЫЕ ОПЦИИ
+    # 🔥 УНИВЕРСАЛЬНЫЕ ОПЦИИ ДЛЯ ВСЕХ
     ydl_opts.update({
-        'retries': 10,
-        'fragment_retries': 10,
+        'retries': 15,
+        'fragment_retries': 15,
         'skip_unavailable_fragments': True,
         'ignoreerrors': True,
         'extract_flat': False,
         'prefer_ffmpeg': True,
         'ffmpeg_location': '/usr/bin/ffmpeg' if os.name != 'nt' else None,
+        'sleep_interval': 1,  # Защита от бана
+        'max_sleep_interval': 5,
+        'sleep_interval_requests': 1,
     })
     
     try:
@@ -195,8 +223,12 @@ def extract_video_info(url: str) -> dict:
         'quiet': True,
         'no_warnings': True,
         'extract_flat': True,
-        'cookiesfrombrowser': ('chrome',),
     }
+    
+    # Добавляем куки для YouTube
+    if "youtube.com" in url or "youtu.be" in url:
+        if COOKIES_FILE:
+            ydl_opts['cookiefile'] = COOKIES_FILE
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -251,6 +283,11 @@ async def download_media_with_progress(url: str, output_path: str, progress_call
             )],
         }
         
+        # Куки для YouTube
+        if "youtube.com" in url or "youtu.be" in url:
+            if COOKIES_FILE:
+                ydl_opts['cookiefile'] = COOKIES_FILE
+        
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -293,8 +330,12 @@ async def download_media_hq(url: str, output_path: str) -> bool:
             'socket_timeout': 10,
             'retries': 10,
             'fragment_retries': 10,
-            'cookiesfrombrowser': ('chrome',),
+            'user_agent': random.choice(USER_AGENTS),
         }
+        
+        if "youtube.com" in url or "youtu.be" in url:
+            if COOKIES_FILE:
+                ydl_opts['cookiefile'] = COOKIES_FILE
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -327,7 +368,12 @@ async def download_audio(url: str, output_path: str) -> bool:
             }],
             'socket_timeout': 10,
             'retries': 10,
+            'user_agent': random.choice(USER_AGENTS),
         }
+        
+        if "youtube.com" in url or "youtu.be" in url:
+            if COOKIES_FILE:
+                ydl_opts['cookiefile'] = COOKIES_FILE
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -340,22 +386,14 @@ async def download_audio(url: str, output_path: str) -> bool:
     return await asyncio.to_thread(_sync_audio)
 
 # ==========================================
-# 🔥 НОВАЯ ФУНКЦИЯ: ЗАГРУЗКА С ROTATING USER-AGENT
+# 🔥 ЗАГРУЗКА С РОТАЦИЕЙ USER-AGENT
 # ==========================================
 async def download_media_rotating(url: str, output_path: str) -> bool:
     """
     Скачивание с ротацией User-Agent для обхода блокировок.
     """
     def _sync_rotating():
-        user_agents = [
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
-            'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15',
-            'Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/117.0',
-            'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36',
-        ]
-        ua = random.choice(user_agents)
+        ua = random.choice(USER_AGENTS)
         
         ydl_opts = {
             'format': 'b[ext=mp4][filesize<50M]/best[ext=mp4][filesize<50M]/best[filesize<50M]/best',
@@ -369,8 +407,11 @@ async def download_media_rotating(url: str, output_path: str) -> bool:
             'user_agent': ua,
             'retries': 15,
             'fragment_retries': 15,
-            'cookiesfrombrowser': ('chrome',),
         }
+        
+        if "youtube.com" in url or "youtu.be" in url:
+            if COOKIES_FILE:
+                ydl_opts['cookiefile'] = COOKIES_FILE
         
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
