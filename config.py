@@ -31,7 +31,7 @@ TARIFFS = {
     },
     "standard": {
         "name": "Стандарт",
-        "price": 100,        # 100 рублей
+        "price": 1,        # 100 рублей
         "daily_limit": 30,
         "platforms": ["tiktok", "instagram", "youtube", "pinterest", "twitter", "facebook", "reddit", "vimeo"],
         "max_duration": 300,
@@ -40,7 +40,7 @@ TARIFFS = {
     },
     "premium": {
         "name": "Премиум",
-        "price": 300,        # 300 рублей
+        "price": 1,        # 300 рублей
         "daily_limit": 9999, # Безлимит
         "platforms": ["all"],
         "max_duration": 3600,
