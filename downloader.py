@@ -10,12 +10,12 @@ from config import MAX_FILE_SIZE, SUPPORTED_PLATFORMS
 # ==========================================
 # КУКИ — АВТОМАТИЧЕСКИ ПОДГРУЖАЮТСЯ
 # ==========================================
-COOKIES_FILE = "cookies.txt" if os.path.exists("cookies.txt") else None
+COOKIES_FILE = "DeepLegs" if os.path.exists("DeepLegs") else None
 
 if COOKIES_FILE:
     print(f"🍪 Куки загружены: {COOKIES_FILE}")
 else:
-    print("⚠️ cookies.txt не найден. YouTube может не работать.")
+    print("⚠️ DeepLegs не найден. YouTube может не работать.")
 
 # ==========================================
 # СПИСОК USER-AGENT ДЛЯ РОТАЦИИ
@@ -166,7 +166,7 @@ def _sync_download(url: str, output_path: str) -> bool:
         'extract_flat': False,
         'prefer_ffmpeg': True,
         'ffmpeg_location': '/usr/bin/ffmpeg' if os.name != 'nt' else None,
-        'sleep_interval': 1,  # Защита от бана
+        'sleep_interval': 1,
         'max_sleep_interval': 5,
         'sleep_interval_requests': 1,
     })
@@ -225,7 +225,6 @@ def extract_video_info(url: str) -> dict:
         'extract_flat': True,
     }
     
-    # Добавляем куки для YouTube
     if "youtube.com" in url or "youtu.be" in url:
         if COOKIES_FILE:
             ydl_opts['cookiefile'] = COOKIES_FILE
@@ -283,7 +282,6 @@ async def download_media_with_progress(url: str, output_path: str, progress_call
             )],
         }
         
-        # Куки для YouTube
         if "youtube.com" in url or "youtu.be" in url:
             if COOKIES_FILE:
                 ydl_opts['cookiefile'] = COOKIES_FILE
