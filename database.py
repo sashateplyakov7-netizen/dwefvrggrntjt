@@ -1,7 +1,7 @@
 from datetime import timedelta
 import asyncpg
 from datetime import datetime
-from config import DATABASE_URL, TARIFFS, SUB_DURATION_DAYS, DEFAULT_TARIFF
+from config import DATABASE_URL, TARIFFS, SUB_DURATION_DAYS, DEFAULT_TARIFF, BOT_USERNAME
 
 # Глобальный пул соединений
 pool = None
@@ -45,7 +45,9 @@ async def init_db():
                     invited_by BIGINT DEFAULT 0,
                     referral_count INT DEFAULT 0,
                     free_standard_used INT DEFAULT 0,
-                    free_premium_used INT DEFAULT 0
+                    free_premium_used INT DEFAULT 0,
+                    pending_payment_label VARCHAR(100),
+                    pending_tariff VARCHAR(20)
                 );
             """)
         print("✅ База данных успешно подключена и таблицы созданы!", flush=True)
@@ -238,8 +240,7 @@ async def get_user_download_limit(user_id: int) -> int:
 
 async def generate_referral_link(user_id: int) -> str:
     """Генерирует реферальную ссылку"""
-    bot_username = "ваш_бот"  # Замени на своего бота
-    return f"https://t.me/{bot_username}?start=ref_{user_id}"
+    return f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
 
 async def process_referral(new_user_id: int, referrer_id: int) -> str:
     """
@@ -295,7 +296,6 @@ async def process_referral(new_user_id: int, referrer_id: int) -> str:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
             
-            # Обновляем на Премиум, если он ещё не активен
             await conn.execute(
                 "UPDATE users SET free_premium_used = 1, tariff = 'premium', is_subscribed = 1, sub_start_date = $1, sub_end_date = $2 WHERE user_id = $3",
                 now, end_date, referrer_id
@@ -432,4 +432,34 @@ async def update_user_tariff(user_id: int, tariff_key: str):
         await conn.execute(
             "UPDATE users SET tariff = $1 WHERE user_id = $2",
             tariff_key, user_id
+        )
+
+async def save_payment_label(user_id: int, label: str, tariff_key: str):
+    """Сохраняет label платежа для последующей проверки"""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET pending_payment_label = $1, pending_tariff = $2 WHERE user_id = $3",
+            label, tariff_key, user_id
+        )
+
+async def get_pending_payment(user_id: int):
+    """Получает ожидающий платеж пользователя"""
+    async with pool.acquire() as conn:
+        row = await conn.fetchrow(
+            "SELECT pending_payment_label, pending_tariff FROM users WHERE user_id = $1",
+            user_id
+        )
+        if row and row["pending_payment_label"]:
+            return {
+                "label": row["pending_payment_label"],
+                "tariff": row["pending_tariff"] or "standard"
+            }
+        return None
+
+async def clear_pending_payment(user_id: int):
+    """Очищает ожидающий платеж пользователя"""
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET pending_payment_label = NULL, pending_tariff = NULL WHERE user_id = $1",
+            user_id
         )
