@@ -8,54 +8,10 @@ from urllib.parse import urlparse, parse_qs
 from config import MAX_FILE_SIZE, SUPPORTED_PLATFORMS
 
 # ==========================================
-# КУКИ — ПРОВЕРЯЕМ И ПРОПУСКАЕМ, ЕСЛИ НЕ РАБОТАЮТ
+# КУКИ — ПОЛНОСТЬЮ ОТКЛЮЧЕНЫ, ТОЛЬКО ОБХОДЫ
 # ==========================================
-COOKIES_FILE = "DeepLegs" if os.path.exists("DeepLegs") else None
-
-if COOKIES_FILE:
-    try:
-        # Проверяем размер файла
-        if os.path.getsize(COOKIES_FILE) > 500:
-            print(f"🍪 Куки загружены из файла: {COOKIES_FILE}")
-        else:
-            print(f"⚠️ Файл кук повреждён или пустой, пропускаем...")
-            COOKIES_FILE = None
-    except:
-        print(f"⚠️ Ошибка чтения файла кук, пропускаем...")
-        COOKIES_FILE = None
-
-if not COOKIES_FILE:
-    print("⚠️ Куки не найдены — YouTube может работать медленнее")
-
-# ==========================================
-# 🧠 ФУНКЦИЯ ПОЛУЧЕНИЯ СВЕЖИХ КУК (ПРОПУСКАЕТ ОШИБКИ)
-# ==========================================
-def get_youtube_cookies() -> dict:
-    """
-    Пытается получить свежие куки для YouTube.
-    Если не получается — возвращает None.
-    """
-    try:
-        import ytc
-        cookies_str = ytc.youtube()
-        if cookies_str and len(cookies_str) > 100:
-            print("🍪 Куки обновлены через ytc")
-            return {'http_headers': {'Cookie': cookies_str}}
-    except Exception as e:
-        print(f"⚠️ ytc не сработал: {e}")
-    
-    if COOKIES_FILE and os.path.exists(COOKIES_FILE):
-        try:
-            if os.path.getsize(COOKIES_FILE) > 500:
-                print(f"🍪 Используем файл кук: {COOKIES_FILE}")
-                return {'cookiefile': COOKIES_FILE}
-            else:
-                print(f"⚠️ Файл кук слишком маленький, пропускаем...")
-        except:
-            print(f"⚠️ Ошибка чтения файла кук, пропускаем...")
-    
-    # 🔥 ВСЕГДА ВОЗВРАЩАЕМ None, ЕСЛИ НЕТ КУК
-    return None
+COOKIES_FILE = None
+print("⚠️ Куки ОТКЛЮЧЕНЫ — используются только обходные пути")
 
 # ==========================================
 # 🌍 ПРОКСИ (из переменных окружения)
@@ -83,7 +39,6 @@ def detect_platform(url: str) -> str:
         if platform in url_lower:
             return platform
     
-    # 🔥 ЕСЛИ НЕ НАШЛИ — ПЫТАЕМСЯ ПО ДОМЕНУ
     try:
         from urllib.parse import urlparse
         domain = urlparse(url).netloc.lower()
@@ -117,7 +72,6 @@ def detect_platform(url: str) -> str:
     except:
         pass
     
-    # 3️⃣ ПО ПАТТЕРНАМ В URL
     patterns = {
         r'tiktok\.com/@[\w\.]+/video/': 'tiktok.com',
         r'tiktok\.com/@[\w\.]+': 'tiktok.com',
@@ -157,13 +111,9 @@ def get_format_for_quality(quality: str) -> str:
     return quality_formats.get(quality, quality_formats["best"])
 
 # ==========================================
-# 🔥 УНИВЕРСАЛЬНЫЙ ОБХОДНОЙ ПУТЬ ДЛЯ ВСЕХ ПЛАТФОРМ
+# 🔥 УНИВЕРСАЛЬНЫЙ ОБХОДНОЙ ПУТЬ
 # ==========================================
 def universal_fallback(url: str, output_path: str) -> bool:
-    """
-    Универсальный обходной путь для всех платформ.
-    Пробует разные форматы и методы.
-    """
     try:
         print("🔄 Универсальный обходной путь...", flush=True)
         
@@ -210,11 +160,10 @@ def universal_fallback(url: str, output_path: str) -> bool:
         return False
 
 # ==========================================
-# 🔥 СПЕЦИАЛЬНЫЕ ОБХОДНЫЕ ПУТИ ДЛЯ ПЛАТФОРМ
+# 🔥 ОБХОДНЫЕ ПУТИ ДЛЯ ПЛАТФОРМ
 # ==========================================
 
 def fallback_youtube(url: str, output_path: str) -> bool:
-    """Обходной путь для YouTube (включая Shorts)"""
     try:
         print("🔄 YouTube fallback...", flush=True)
         
@@ -245,9 +194,6 @@ def fallback_youtube(url: str, output_path: str) -> bool:
                     'retries': 3,
                 }
                 
-                if COOKIES_FILE:
-                    ydl_opts['cookiefile'] = COOKIES_FILE
-                
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([alt_url])
                 
@@ -262,7 +208,6 @@ def fallback_youtube(url: str, output_path: str) -> bool:
         return False
 
 def fallback_tiktok(url: str, output_path: str) -> bool:
-    """Обходной путь для TikTok"""
     try:
         import requests
         print("🔄 TikTok fallback...", flush=True)
@@ -284,7 +229,6 @@ def fallback_tiktok(url: str, output_path: str) -> bool:
         return False
 
 def fallback_instagram(url: str, output_path: str) -> bool:
-    """Обходной путь для Instagram"""
     try:
         import requests
         print("🔄 Instagram fallback...", flush=True)
@@ -306,7 +250,6 @@ def fallback_instagram(url: str, output_path: str) -> bool:
         return False
 
 def fallback_facebook(url: str, output_path: str) -> bool:
-    """Обходной путь для Facebook"""
     try:
         import requests
         print("🔄 Facebook fallback...", flush=True)
@@ -328,7 +271,6 @@ def fallback_facebook(url: str, output_path: str) -> bool:
         return False
 
 def fallback_twitter(url: str, output_path: str) -> bool:
-    """Обходной путь для Twitter/X"""
     try:
         import requests
         print("🔄 Twitter fallback...", flush=True)
@@ -350,7 +292,6 @@ def fallback_twitter(url: str, output_path: str) -> bool:
         return False
 
 def fallback_reddit(url: str, output_path: str) -> bool:
-    """Обходной путь для Reddit"""
     try:
         import requests
         print("🔄 Reddit fallback...", flush=True)
@@ -375,7 +316,6 @@ def fallback_reddit(url: str, output_path: str) -> bool:
         return False
 
 def fallback_pinterest(url: str, output_path: str) -> bool:
-    """Обходной путь для Pinterest"""
     try:
         import requests
         from bs4 import BeautifulSoup
@@ -400,7 +340,6 @@ def fallback_pinterest(url: str, output_path: str) -> bool:
         return False
 
 def fallback_vimeo(url: str, output_path: str) -> bool:
-    """Обходной путь для Vimeo"""
     try:
         import requests
         print("🔄 Vimeo fallback...", flush=True)
@@ -426,7 +365,6 @@ def fallback_vimeo(url: str, output_path: str) -> bool:
         return False
 
 def fallback_twitch(url: str, output_path: str) -> bool:
-    """Обходной путь для Twitch"""
     try:
         print("🔄 Twitch fallback...", flush=True)
         ydl_opts = {
@@ -447,7 +385,6 @@ def fallback_twitch(url: str, output_path: str) -> bool:
         return False
 
 def fallback_vk(url: str, output_path: str) -> bool:
-    """Обходной путь для VK"""
     try:
         import requests
         print("🔄 VK fallback...", flush=True)
@@ -470,7 +407,6 @@ def fallback_vk(url: str, output_path: str) -> bool:
         return False
 
 def fallback_rutube(url: str, output_path: str) -> bool:
-    """Обходной путь для Rutube"""
     try:
         import requests
         print("🔄 Rutube fallback...", flush=True)
@@ -495,7 +431,6 @@ def fallback_rutube(url: str, output_path: str) -> bool:
         return False
 
 def fallback_dailymotion(url: str, output_path: str) -> bool:
-    """Обходной путь для Dailymotion"""
     try:
         import requests
         print("🔄 Dailymotion fallback...", flush=True)
@@ -520,7 +455,6 @@ def fallback_dailymotion(url: str, output_path: str) -> bool:
         return False
 
 def fallback_9gag(url: str, output_path: str) -> bool:
-    """Обходной путь для 9GAG"""
     try:
         import requests
         print("🔄 9GAG fallback...", flush=True)
@@ -542,7 +476,6 @@ def fallback_9gag(url: str, output_path: str) -> bool:
         return False
 
 def fallback_telegram(url: str, output_path: str) -> bool:
-    """Обходной путь для Telegram"""
     try:
         import requests
         print("🔄 Telegram fallback...", flush=True)
@@ -566,7 +499,7 @@ def fallback_telegram(url: str, output_path: str) -> bool:
         return False
 
 # ==========================================
-# ОСНОВНАЯ ФУНКЦИЯ ЗАГРУЗКИ (УСКОРЕННАЯ)
+# ОСНОВНАЯ ФУНКЦИЯ ЗАГРУЗКИ
 # ==========================================
 def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
     platform = detect_platform(url)
@@ -613,15 +546,8 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
     if PROXY_URL:
         ydl_opts['proxy'] = PROXY_URL
     
-    # 🔥 КУКИ ДЛЯ YOUTUBE (ПРОПУСКАЕМ ОШИБКИ)
+    # 🔥 БЕЗ КУК — ТОЛЬКО ЗАГОЛОВКИ
     if platform in ["youtube.com", "youtu.be"] or is_shorts:
-        try:
-            cookies = get_youtube_cookies()
-            if cookies:
-                ydl_opts.update(cookies)
-        except Exception as e:
-            print(f"⚠️ Ошибка получения кук, продолжаем без них: {e}")
-        
         ydl_opts['http_headers'] = {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -687,14 +613,13 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
     except Exception as e:
         print(f"❌ [2] Ошибка: {e}", flush=True)
     
-    # 3️⃣ БЕЗ КУК
+    # 3️⃣ БЕЗ HTTP_HEADERS
     try:
-        print(f"📥 [3] Без кук...", flush=True)
-        no_cookies_opts = ydl_opts.copy()
-        no_cookies_opts.pop('cookiefile', None)
-        no_cookies_opts.pop('http_headers', None)
-        no_cookies_opts['format'] = 'best'
-        with yt_dlp.YoutubeDL(no_cookies_opts) as ydl:
+        print(f"📥 [3] Без заголовков...", flush=True)
+        no_headers_opts = ydl_opts.copy()
+        no_headers_opts.pop('http_headers', None)
+        no_headers_opts['format'] = 'best'
+        with yt_dlp.YoutubeDL(no_headers_opts) as ydl:
             ydl.download([url])
         if os.path.exists(output_path):
             return True
@@ -730,7 +655,7 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
                 return True
             break
     
-    # 5️⃣ УНИВЕРСАЛЬНЫЙ ОБХОДНОЙ ПУТЬ (ПОСЛЕДНИЙ ШАНС)
+    # 5️⃣ УНИВЕРСАЛЬНЫЙ ОБХОДНОЙ ПУТЬ
     print(f"📥 [5] Универсальный обходной путь...", flush=True)
     if universal_fallback(url, output_path):
         return True
@@ -770,11 +695,16 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
         }
         
         if "youtube.com" in url or "youtu.be" in url:
-            cookies = get_youtube_cookies()
-            if cookies:
-                ydl_opts.update(cookies)
-            if COOKIES_FILE:
-                ydl_opts['cookiefile'] = COOKIES_FILE
+            ydl_opts['http_headers'] = {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
+            }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
@@ -794,10 +724,6 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
             'retries': 3,
             'user_agent': random.choice(USER_AGENTS),
         }
-        
-        if "youtube.com" in url or "youtu.be" in url:
-            if COOKIES_FILE:
-                ydl_opts_no_convert['cookiefile'] = COOKIES_FILE
         
         with yt_dlp.YoutubeDL(ydl_opts_no_convert) as ydl:
             ydl.download([url])
@@ -831,8 +757,6 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
                     'retries': 3,
                     'user_agent': random.choice(USER_AGENTS),
                 }
-                if COOKIES_FILE:
-                    alt_opts['cookiefile'] = COOKIES_FILE
                 
                 with yt_dlp.YoutubeDL(alt_opts) as ydl:
                     ydl.download([url])
@@ -882,11 +806,16 @@ def _sync_download_with_cut(url: str, output_path: str, start_time: str = None, 
         }
         
         if "youtube.com" in url or "youtu.be" in url:
-            cookies = get_youtube_cookies()
-            if cookies:
-                ydl_opts.update(cookies)
-            if COOKIES_FILE:
-                ydl_opts['cookiefile'] = COOKIES_FILE
+            ydl_opts['http_headers'] = {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
+            }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
@@ -950,13 +879,6 @@ def extract_video_info(url: str) -> dict:
             'no_check_certificate': True,
             'prefer_insecure': True,
         })
-    
-    if COOKIES_FILE:
-        try:
-            if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 500:
-                ydl_opts['cookiefile'] = COOKIES_FILE
-        except:
-            pass
     
     if "youtube.com" in url or "youtu.be" in url:
         ydl_opts['http_headers'].update({
@@ -1059,8 +981,16 @@ async def download_media_with_progress(url: str, output_path: str, progress_call
             )],
         }
         if "youtube.com" in url or "youtu.be" in url:
-            if COOKIES_FILE:
-                ydl_opts['cookiefile'] = COOKIES_FILE
+            ydl_opts['http_headers'] = {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
+            }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -1098,8 +1028,16 @@ async def download_media_rotating(url: str, output_path: str, quality: str = "be
             'fragment_retries': 3,
         }
         if "youtube.com" in url or "youtu.be" in url:
-            if COOKIES_FILE:
-                ydl_opts['cookiefile'] = COOKIES_FILE
+            ydl_opts['http_headers'] = {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
+            }
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
@@ -1117,8 +1055,16 @@ def get_available_qualities(url: str) -> list:
             'extract_flat': True,
         }
         if "youtube.com" in url or "youtu.be" in url:
-            if COOKIES_FILE:
-                ydl_opts['cookiefile'] = COOKIES_FILE
+            ydl_opts['http_headers'] = {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Connection': 'keep-alive',
+                'Sec-Fetch-Mode': 'navigate',
+                'Sec-Fetch-Site': 'none',
+                'Sec-Fetch-User': '?1',
+                'Upgrade-Insecure-Requests': '1',
+            }
         
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
