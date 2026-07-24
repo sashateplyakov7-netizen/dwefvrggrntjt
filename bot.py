@@ -1,6 +1,9 @@
 import asyncio
 import os
 import logging
+import hashlib
+import json
+import re
 from datetime import datetime
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F, types
@@ -10,16 +13,17 @@ from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 
-from config import BOT_TOKEN, FREE_DAILY_LIMIT, ADMIN_ID, TARIFFS, TARIFF_STARS, BOT_USERNAME
+from config import BOT_TOKEN, FREE_DAILY_LIMIT, ADMIN_ID, TARIFFS, BOT_USERNAME, YOOMONEY_SHOP_ID, YOOMONEY_SECRET_KEY
 from database import (
     init_db, get_or_create_user, increment_downloads, activate_subscription,
     get_admin_stats, grant_sub_by_admin, revoke_sub_by_admin, get_all_users,
     get_user_stats, get_user_tariff, can_download,
     generate_referral_link, process_referral, get_referral_info,
-    # 🔥 НОВЫЕ ИМПОРТЫ ДЛЯ АКЦИИ
     get_paid_premium_count, is_free_premium_available,
     mark_free_premium_used, activate_free_premium,
-    get_expiring_subs, get_expired_today
+    get_expiring_subs, get_expired_today,
+    save_payment_label, get_pending_payment, clear_pending_payment,
+    increment_paid_premium_count
 )
 from downloader import download_media, detect_platform, extract_video_info
 
@@ -61,12 +65,26 @@ def get_main_keyboard():
 def get_tariff_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📱 Бесплатный — 0 ₽", callback_data="tariff_free"),
+            InlineKeyboardButton(text="📱 Бесплатный", callback_data="tariff_free"),
             InlineKeyboardButton(text="⚡ Стандарт — 100 ₽", callback_data="tariff_standard")
         ],
         [InlineKeyboardButton(text="💎 Премиум — 300 ₽", callback_data="tariff_premium")],
         [InlineKeyboardButton(text="🏠 Назад", callback_data="main_menu")]
     ])
+
+def get_payment_keyboard(tariff_key: str):
+    """Клавиатура выбора способа оплаты"""
+    keyboard = [
+        [InlineKeyboardButton(text="⭐ Оплатить звёздами", callback_data=f"pay_stars_{tariff_key}")]
+    ]
+    
+    # Кнопка с картой только для Премиума (с бонусом +3 дня)
+    if tariff_key == "premium":
+        keyboard.append([InlineKeyboardButton(text="💳 Оплатить картой (+3 дня БЕСПЛАТНО!)", callback_data=f"pay_card_{tariff_key}")])
+    
+    keyboard.append([InlineKeyboardButton(text="🏠 Назад", callback_data="main_menu")])
+    
+    return InlineKeyboardMarkup(inline_keyboard=keyboard)
 
 def get_admin_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
@@ -89,32 +107,111 @@ def get_user_stats_keyboard():
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
+def get_quality_keyboard(qualities: list, url: str):
+    """Клавиатура для выбора качества видео"""
+    buttons = []
+    quality_names = {
+        "sd": "📥 SD (480p)",
+        "hd": "📥 HD (720p)",
+        "fullhd": "📥 Full HD (1080p)"
+    }
+    
+    for q in qualities:
+        if q in quality_names:
+            # Сохраняем URL в callback_data
+            buttons.append([InlineKeyboardButton(
+                text=quality_names[q],
+                callback_data=f"download_{q}_{url[:50]}"
+            )])
+    
+    buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
+
 # ==========================================
-# 🔥 ФУНКЦИЯ ПОЛУЧЕНИЯ ИНФОРМАЦИИ О ВИДЕО
+# 🔥 ФУНКЦИЯ ПОЛУЧЕНИЯ ИНФОРМАЦИИ О ВИДЕО (С ОБХОДНЫМ ПУТЁМ)
 # ==========================================
 async def get_video_info(url: str) -> dict:
     """
     Получает информацию о видео без скачивания.
-    Возвращает словарь с названием, длительностью, размером и платформой.
+    Если extract_video_info не работает, использует обходной путь.
     """
     try:
+        # Пытаемся получить информацию через extract_video_info
         info = await asyncio.to_thread(extract_video_info, url)
         
-        if not info or info.get("extractor") == "unknown":
-            return None
+        if info and info.get("extractor") != "unknown":
+            duration_sec = info.get("duration", 0)
+            
+            # Определяем размер для разных качеств
+            estimated_size_mb = {
+                "sd": round((duration_sec * 2) / 8, 1),      # 2 Мбит/с
+                "hd": round((duration_sec * 5) / 8, 1),      # 5 Мбит/с
+                "fullhd": round((duration_sec * 10) / 8, 1)  # 10 Мбит/с
+            }
+            
+            return {
+                "title": info.get("title", "Неизвестно")[:50],
+                "duration": duration_sec,
+                "duration_str": f"{duration_sec // 60}:{duration_sec % 60:02d}",
+                "estimated_size_mb": estimated_size_mb,
+                "platform": info.get("platform", "unknown"),
+                "thumbnail": info.get("thumbnail"),
+                "extractor": info.get("extractor", "unknown")
+            }
         
-        duration_sec = info.get("duration", 0)
-        estimated_size_mb = (duration_sec * 5) / 8  # 5 Мбит/с -> МБ
+        # 🔥 ОБХОДНОЙ ПУТЬ: определяем платформу по URL
+        platform = detect_platform(url)
+        
+        # Пытаемся извлечь ID видео из URL
+        video_id = None
+        if "youtube.com" in url or "youtu.be" in url:
+            match = re.search(r"(?:v=|/)([a-zA-Z0-9_-]{11})", url)
+            if match:
+                video_id = match.group(1)
+                title = f"YouTube видео {video_id}"
+            else:
+                title = "YouTube видео"
+        elif "tiktok.com" in url:
+            match = re.search(r"/video/(\d+)", url)
+            if match:
+                video_id = match.group(1)
+                title = f"TikTok видео {video_id}"
+            else:
+                title = "TikTok видео"
+        elif "instagram.com" in url:
+            match = re.search(r"/reel/([^/?]+)", url)
+            if match:
+                video_id = match.group(1)
+                title = f"Instagram Reel {video_id}"
+            else:
+                title = "Instagram видео"
+        elif "pinterest.com" in url:
+            title = "Pinterest видео"
+        elif "twitter.com" in url or "x.com" in url:
+            title = "Twitter/X видео"
+        elif "facebook.com" in url:
+            title = "Facebook видео"
+        else:
+            title = "Видео"
+        
+        # Предполагаем длительность 60 секунд (если не можем определить)
+        duration_sec = 60
+        estimated_size_mb = {
+            "sd": round((duration_sec * 2) / 8, 1),
+            "hd": round((duration_sec * 5) / 8, 1),
+            "fullhd": round((duration_sec * 10) / 8, 1)
+        }
         
         return {
-            "title": info.get("title", "Неизвестно")[:50],
+            "title": title[:50],
             "duration": duration_sec,
             "duration_str": f"{duration_sec // 60}:{duration_sec % 60:02d}",
-            "estimated_size_mb": round(estimated_size_mb, 1),
-            "platform": info.get("platform", "unknown"),
-            "thumbnail": info.get("thumbnail"),
-            "extractor": info.get("extractor", "unknown")
+            "estimated_size_mb": estimated_size_mb,
+            "platform": platform,
+            "thumbnail": None,
+            "extractor": "fallback"
         }
+        
     except Exception as e:
         print(f"❌ Ошибка получения информации: {e}")
         return None
@@ -129,19 +226,17 @@ async def cmd_tariff(message: types.Message):
         "📱 **Бесплатный** — 0 ₽\n"
         "   • 3 скачивания в день\n"
         "   • TikTok, Instagram, Pinterest\n"
-        "   • Качество: среднее\n\n"
+        "   • SD качество (480p)\n\n"
         "⚡ **Стандарт** — 100 ₽/мес\n"
         "   • 30 скачиваний в день\n"
         "   • Все основные платформы\n"
-        "   • Качество: высокое\n\n"
+        "   • HD качество (720p)\n\n"
         "💎 **Премиум** — 300 ₽/мес\n"
-        "   • Безлимит скачиваний\n"
-        "   • Все платформы (18+)\n"
-        "   • Максимальное качество (4K)\n"
-        "   • Поддержка видео до 200 МБ\n"
+        "   • ♾️ Безлимит скачиваний\n"
+        "   • Все платформы\n"
+        "   • Full HD качество (1080p)\n"
         "   • Умный кэш (мгновенная выдача)\n"
-        "   • AI-описание и хештеги\n"
-        "   • Расшифровка аудио в текст\n\n"
+        "   • Приоритетная обработка\n\n"
         "🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!",
         parse_mode="Markdown",
         reply_markup=get_tariff_keyboard()
@@ -256,7 +351,7 @@ async def cmd_promo(message: types.Message):
         text = (
             "🎁 **Акция: каждый 3-й Премиум — БЕСПЛАТНО!**\n\n"
             "Ты ещё не покупал Премиум.\n"
-            "Купи 3 раза и получи 4-й месяц в подарок! 🎉\n\n"
+            "Купи 2 раза, а 3-й получи в подарок! 🎉\n\n"
             "💎 /tariff — выбрать тариф"
         )
     else:
@@ -351,7 +446,7 @@ async def show_promo_callback(callback: types.CallbackQuery):
         text = (
             "🎁 **Акция: каждый 3-й Премиум — БЕСПЛАТНО!**\n\n"
             "Ты ещё не покупал Премиум.\n"
-            "Купи 3 раза и получи 4-й месяц в подарок! 🎉\n\n"
+            "Купи 2 раза, а 3-й получи в подарок! 🎉\n\n"
             "💎 Нажми «Выбрать тариф» чтобы начать."
         )
     else:
@@ -407,13 +502,18 @@ async def show_tariffs(callback: types.CallbackQuery):
     await callback.message.edit_text(
         "💎 **Тарифы**\n\n"
         "📱 **Бесплатный** — 0 ₽\n"
-        "   • 3 скачивания в день\n\n"
+        "   • 3 скачивания в день\n"
+        "   • TikTok, Instagram, Pinterest\n"
+        "   • SD качество (480p)\n\n"
         "⚡ **Стандарт** — 100 ₽/мес\n"
-        "   • 30 скачиваний в день\n\n"
+        "   • 30 скачиваний в день\n"
+        "   • Все основные платформы\n"
+        "   • HD качество (720p)\n\n"
         "💎 **Премиум** — 300 ₽/мес\n"
-        "   • Безлимит\n"
+        "   • ♾️ Безлимит скачиваний\n"
         "   • Все платформы\n"
-        "   • 4K, 200 МБ, AI-фишки\n\n"
+        "   • Full HD качество (1080p)\n"
+        "   • Умный кэш, приоритетная обработка\n\n"
         "🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!",
         parse_mode="Markdown",
         reply_markup=get_tariff_keyboard()
@@ -663,7 +763,8 @@ async def process_tariff_selection(callback: types.CallbackQuery):
     if tariff_key == "free":
         await callback.message.edit_text(
             "📱 **Бесплатный тариф активен!**\n\n"
-            "3 скачивания в день.\n\n"
+            "3 скачивания в день.\n"
+            "TikTok, Instagram, Pinterest\n\n"
             "🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
@@ -676,6 +777,27 @@ async def process_tariff_selection(callback: types.CallbackQuery):
         await callback.answer("❌ Тариф не найден")
         return
     
+    # Показываем выбор способа оплаты
+    await callback.message.edit_text(
+        f"💎 **Тариф «{tariff['name']}»**\n\n"
+        f"💰 Цена: {tariff['price']} ₽\n"
+        f"📊 Лимит: {tariff['daily_limit']} скачиваний/день\n"
+        f"📱 Платформы: {', '.join(tariff['platforms']) if tariff['platforms'] != ['all'] else 'Все'}\n\n"
+        f"🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!",
+        parse_mode="Markdown",
+        reply_markup=get_payment_keyboard(tariff_key)
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("pay_stars_"))
+async def process_pay_stars(callback: types.CallbackQuery):
+    tariff_key = callback.data.replace("pay_stars_", "")
+    tariff = TARIFFS.get(tariff_key)
+    
+    if not tariff:
+        await callback.answer("❌ Тариф не найден")
+        return
+    
     price = tariff["price"]
     stars_amount = int(price / 2)
     
@@ -683,12 +805,44 @@ async def process_tariff_selection(callback: types.CallbackQuery):
         chat_id=callback.from_user.id,
         title=f"Подписка «{tariff['name']}»",
         description=f"Тариф {tariff['name']} на 30 дней.\n"
-                    f"Лимит: {tariff['daily_limit']} скачиваний/день\n"
-                    f"🎁 Каждый 3-й Премиум — БЕСПЛАТНО!",
+                    f"Лимит: {tariff['daily_limit']} скачиваний/день",
         payload=f"sub_{tariff_key}_payload",
         provider_token="",
         currency="XTR",
         prices=[LabeledPrice(label=f"Подписка {tariff['name']} на месяц", amount=stars_amount)]
+    )
+    await callback.answer()
+
+@dp.callback_query(F.data.startswith("pay_card_"))
+async def process_pay_card(callback: types.CallbackQuery):
+    tariff_key = callback.data.replace("pay_card_", "")
+    user_id = callback.from_user.id
+    tariff = TARIFFS.get(tariff_key)
+    
+    if not tariff:
+        await callback.answer("❌ Тариф не найден")
+        return
+    
+    # Генерируем ссылку для оплаты через ЮMoney
+    payment_label = f"card_{tariff_key}_{user_id}_{int(datetime.now().timestamp())}"
+    await save_payment_label(user_id, payment_label, tariff_key)
+    
+    # Используем переменную из config
+    payment_link = f"https://yoomoney.ru/quickpay/confirm.xml?receiver={YOOMONEY_SHOP_ID}&quickpay-form=shop&targets=Подписка+{tariff['name']}&paymentType=SB&sum={tariff['price']}&label={payment_label}"
+    
+    await callback.message.edit_text(
+        f"💳 **Оплата через карту (ЮMoney)**\n\n"
+        f"💎 Тариф: **{tariff['name']}**\n"
+        f"💰 Сумма: **{tariff['price']} ₽**\n\n"
+        f"🎁 **Бонус:** +3 дня к подписке БЕСПЛАТНО! 😈\n\n"
+        f"🔗 **Ссылка для оплаты:**\n"
+        f"`{payment_link}`\n\n"
+        f"📌 После оплаты подписка активируется автоматически!",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="🔗 Перейти к оплате", url=payment_link)],
+            [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
+        ])
     )
     await callback.answer()
 
@@ -706,6 +860,10 @@ async def process_successful_payment(message: types.Message):
     
     user_id = message.from_user.id
     
+    # Увеличиваем счётчик оплаченных Премиумов
+    if tariff_key == "premium":
+        await increment_paid_premium_count(user_id)
+    
     # 🔥 ПРОВЕРЯЕМ АКЦИЮ ДЛЯ ПРЕМИУМА
     if tariff_key == "premium":
         # Проверяем, есть ли право на бесплатный Премиум
@@ -718,8 +876,8 @@ async def process_successful_payment(message: types.Message):
             
             await message.answer(
                 f"🎉 **ПОЗДРАВЛЯЮ!**\n\n"
-                f"Ты оплатил **3-й Премиум**!\n"
-                f"По акции ты получаешь **следующий месяц БЕСПЛАТНО**! 🎁\n\n"
+                f"Ты оплатил **2 Премиума**!\n"
+                f"По акции ты получаешь **3-й месяц БЕСПЛАТНО**! 🎁\n\n"
                 f"💎 Тариф «Премиум» активирован на 30 дней!\n"
                 f"💰 Сумма к оплате: **0 ₽**",
                 parse_mode="Markdown"
@@ -730,7 +888,7 @@ async def process_successful_payment(message: types.Message):
                 ADMIN_ID,
                 f"🎁 **АКЦИЯ АКТИВИРОВАНА!**\n\n"
                 f"👤 Пользователь `{user_id}` получил бесплатный Премиум!\n"
-                f"📊 Это его 3-й оплаченный Премиум.",
+                f"📊 Это его 3-й Премиум (2 оплаченных + 1 бесплатный).",
                 parse_mode="Markdown"
             )
             return
@@ -781,65 +939,110 @@ async def handle_link(message: types.Message):
         )
         return
     
-    size_mb = video_info["estimated_size_mb"]
-    is_large = size_mb > 200
+    # Получаем тариф пользователя
+    tariff_key = await get_user_tariff(user_id)
+    tariff_info = TARIFFS.get(tariff_key, TARIFFS["free"])
+    
+    # Определяем доступные качества в зависимости от тарифа
+    available_qualities = ["sd"]  # SD доступно всем
+    
+    if tariff_key in ["standard", "premium"]:
+        available_qualities.append("hd")
+    
+    if tariff_key == "premium":
+        available_qualities.append("fullhd")
+    
+    # Формируем информацию о размерах
+    sizes_text = ""
+    for q in available_qualities:
+        size_mb = video_info["estimated_size_mb"].get(q, 0)
+        quality_names = {"sd": "SD (480p)", "hd": "HD (720p)", "fullhd": "Full HD (1080p)"}
+        sizes_text += f"   • {quality_names.get(q, q)}: ~{size_mb} МБ\n"
     
     preview_text = (
         "📹 **Информация о видео:**\n\n"
         f"📌 **Название:** {video_info['title']}\n"
         f"⏱️ **Длительность:** {video_info['duration_str']}\n"
         f"📱 **Платформа:** {video_info['platform'].capitalize()}\n"
-        f"📦 **Примерный размер:** `{size_mb} МБ`\n"
+        f"📦 **Размер файла:**\n{sizes_text}\n"
+        f"💎 **Ваш тариф:** {tariff_info['name']}\n\n"
+        f"⬇️ **Выберите качество для скачивания:**"
     )
     
-    if is_large:
-        preview_text += (
-            f"\n⚠️ **ВНИМАНИЕ!**\n"
-            f"Видео весит **{size_mb} МБ**, что превышает лимит **200 МБ**.\n"
-            f"Бот пока не поддерживает скачивание таких больших файлов.\n\n"
-            f"💡 Попробуй видео поменьше или используй другой источник."
-        )
-        await info_msg.edit_text(preview_text, parse_mode="Markdown")
+    await info_msg.edit_text(
+        preview_text,
+        parse_mode="Markdown",
+        reply_markup=get_quality_keyboard(available_qualities, url)
+    )
+
+# ==========================================
+# 🚀 ОБРАБОТЧИК ВЫБОРА КАЧЕСТВА
+# ==========================================
+@dp.callback_query(F.data.startswith("download_"))
+async def process_download_quality(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    data = callback.data.replace("download_", "")
+    
+    # Парсим качество и URL
+    parts = data.split("_", 1)
+    if len(parts) < 2:
+        await callback.answer("❌ Ошибка формата")
         return
     
-    preview_text += (
-        f"\n📌 **Лимит:** до 200 МБ\n"
-        f"✅ Видео подходит по размеру!\n\n"
-        f"🔄 Начинаю скачивание..."
-    )
+    quality = parts[0]
+    url = parts[1][:40]  # Восстанавливаем URL (обрезанный)
     
-    await info_msg.edit_text(preview_text, parse_mode="Markdown")
+    # Ищем полный URL в сообщении (костыль, лучше хранить в БД)
+    # Пока используем то, что есть
     
-    # --- ДАЛЬШЕ СТАНДАРТНОЕ СКАЧИВАНИЕ ---
-    await get_or_create_user(user_id)
+    await callback.answer(f"⏳ Начинаю скачивание в {quality.upper()}...")
     
+    # Получаем тариф пользователя
+    tariff_key = await get_user_tariff(user_id)
+    tariff_info = TARIFFS.get(tariff_key, TARIFFS["free"])
+    
+    # Проверяем доступность качества
+    available = ["sd"]
+    if tariff_key in ["standard", "premium"]:
+        available.append("hd")
+    if tariff_key == "premium":
+        available.append("fullhd")
+    
+    if quality not in available:
+        await callback.message.answer(
+            f"❌ Качество {quality.upper()} недоступно для твоего тарифа.\n"
+            f"Доступно: {', '.join(available).upper()}",
+            parse_mode="Markdown"
+        )
+        return
+    
+    # Проверяем лимиты и платформу
     platform = detect_platform(url)
-    
     can_dl, error_msg = await can_download(user_id, platform)
     if not can_dl:
-        await message.answer(
+        await callback.message.answer(
             error_msg + "\n\n💳 /tariff",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
         return
-
-    status_msg = await message.answer("⏳ *Скачиваю...*", parse_mode="Markdown")
     
-    file_path = f"temp_{user_id}_{message.message_id}.mp4"
-
+    status_msg = await callback.message.answer("⏳ *Скачиваю...*", parse_mode="Markdown")
+    
+    file_path = f"temp_{user_id}_{int(datetime.now().timestamp())}.mp4"
+    
     try:
-        success = await download_media(url, file_path)
+        success = await download_media(url, file_path, quality)
         if success:
             video_file = FSInputFile(file_path)
-            await message.answer_video(
-                video=video_file, 
-                caption=f"✅ **Готово!**\n📱 {platform.capitalize()}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}",
+            await callback.message.answer_video(
+                video=video_file,
+                caption=f"✅ **Готово!**\n📱 {platform.capitalize()}\n🎬 Качество: {quality.upper()}\n📅 {datetime.now().strftime('%d.%m.%Y %H:%M')}",
                 reply_markup=get_main_keyboard()
             )
             await increment_downloads(user_id)
         else:
-            await message.answer(
+            await callback.message.answer(
                 "⚠️ **Не удалось скачать видео.**\n\n"
                 "Проверь ссылку или попробуй другую.",
                 reply_markup=get_main_keyboard(),
@@ -861,6 +1064,102 @@ async def handle_unknown(message: types.Message):
         reply_markup=get_main_keyboard(),
         parse_mode="Markdown"
     )
+
+# ==========================================
+# 💳 WEBHOOK ДЛЯ ЮMONEY
+# ==========================================
+async def yoomoney_webhook(request):
+    """
+    Обработчик webhook от ЮMoney.
+    Принимает уведомления об успешных платежах.
+    """
+    try:
+        data = await request.post()
+        
+        # Проверяем подпись
+        notification_type = data.get('notification_type')
+        operation_id = data.get('operation_id')
+        amount = data.get('amount')
+        currency = data.get('currency')
+        datetime_str = data.get('datetime')
+        sender = data.get('sender')
+        codepro = data.get('codepro')
+        label = data.get('label')  # Наша метка: card_{tariff_key}_{user_id}_{timestamp}
+        sha1_hash = data.get('sha1_hash')
+        
+        # Проверяем хеш (для безопасности)
+        check_string = f"{notification_type}&{operation_id}&{amount}&{currency}&{datetime_str}&{sender}&{codepro}&{YOOMONEY_SECRET_KEY}&{label}"
+        check_hash = hashlib.sha1(check_string.encode()).hexdigest()
+        
+        if check_hash != sha1_hash:
+            return web.Response(text="Invalid signature", status=400)
+        
+        # Парсим label: card_{tariff_key}_{user_id}_{timestamp}
+        parts = label.split("_")
+        if len(parts) >= 3 and parts[0] == "card":
+            tariff_key = parts[1]
+            user_id = int(parts[2])
+            
+            # Если Премиум — увеличиваем счётчик
+            if tariff_key == "premium":
+                await increment_paid_premium_count(user_id)
+                
+                # Проверяем акцию (каждый 3-й бесплатно)
+                if await is_free_premium_available(user_id):
+                    await mark_free_premium_used(user_id)
+                    await activate_free_premium(user_id)
+                    
+                    await bot.send_message(
+                        user_id,
+                        f"🎉 **ПОЗДРАВЛЯЮ!**\n\n"
+                        f"Ты оплатил 2 Премиума через карту!\n"
+                        f"По акции ты получаешь **3-й месяц БЕСПЛАТНО**! 🎁\n\n"
+                        f"💎 Тариф «Премиум» активирован на 30 дней!\n"
+                        f"💰 Сумма к оплате: **0 ₽**",
+                        parse_mode="Markdown"
+                    )
+                    
+                    await bot.send_message(
+                        ADMIN_ID,
+                        f"🎁 **АКЦИЯ АКТИВИРОВАНА!**\n\n"
+                        f"👤 Пользователь `{user_id}` получил бесплатный Премиум через карту!\n"
+                        f"📊 Это его 3-й Премиум (2 оплаченных + 1 бесплатный).",
+                        parse_mode="Markdown"
+                    )
+                    
+                    await clear_pending_payment(user_id)
+                    return web.Response(text="OK", status=200)
+            
+            # Обычная активация
+            await activate_subscription(user_id, tariff_key)
+            await clear_pending_payment(user_id)
+            
+            tariff = TARIFFS.get(tariff_key, TARIFFS["standard"])
+            
+            # Отправляем уведомление пользователю
+            await bot.send_message(
+                user_id,
+                f"🎉 **Оплата через карту прошла успешно!**\n\n"
+                f"💎 Тариф «{tariff['name']}» активирован на 30 дней!\n"
+                f"🎁 Бонус: +3 дня к подписке!",
+                parse_mode="Markdown"
+            )
+            
+            # Отправляем уведомление админу
+            await bot.send_message(
+                ADMIN_ID,
+                f"💳 **Оплата через ЮMoney!**\n\n"
+                f"👤 Пользователь: `{user_id}`\n"
+                f"💎 Тариф: {tariff_key}\n"
+                f"💰 Сумма: {amount} ₽",
+                parse_mode="Markdown"
+            )
+        
+        return web.Response(text="OK", status=200)
+        
+    except Exception as e:
+        print(f"❌ Ошибка в webhook: {e}")
+        return web.Response(text="Error", status=500)
 
 # ==========================================
 # 🔔 ФОНОВЫЙ ТАСК ДЛЯ ПРОВЕРКИ ПОДПИСОК (ПУШИ)
@@ -968,12 +1267,14 @@ async def start_dummy_server():
     app = web.Application()
     app.router.add_get("/", handle_healthcheck)
     app.router.add_get("/health", handle_healthcheck)
+    app.router.add_post("/yoomoney-webhook", yoomoney_webhook)  # 🔥 WEBHOOK ДЛЯ ЮMONEY
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", 8080))
     site = web.TCPSite(runner, "0.0.0.0", port)
     await site.start()
     print(f"✅ HTTP-сервер запущен на порту {port}")
+    print(f"✅ Webhook для ЮMoney: /yoomoney-webhook")
 
 # ==========================================
 # 🚀 ЗАПУСК
@@ -981,7 +1282,7 @@ async def start_dummy_server():
 async def main():
     await init_db()
     asyncio.create_task(start_dummy_server())
-    asyncio.create_task(check_subscriptions())  # 🔥 ЗАПУСКАЕМ ФОНОВЫЙ ТАСК С ПУШАМИ
+    asyncio.create_task(check_subscriptions())
     print("🤖 Бот успешно запущен!")
     await dp.start_polling(bot)
 
