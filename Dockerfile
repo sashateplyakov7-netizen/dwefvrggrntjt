@@ -1,9 +1,10 @@
 FROM python:3.11-slim
 
-# Установка ffmpeg + Playwright dependencies
+# Установка ffmpeg + Playwright dependencies + aria2
 RUN apt-get update && apt-get install -y \
     ffmpeg \
     curl \
+    aria2 \
     libnss3 \
     libatk-bridge2.0-0 \
     libdrm2 \
@@ -30,4 +31,3 @@ EXPOSE 8080
 
 # Запуск
 CMD ["python", "bot.py"]
-RUN apt-get update && apt-get install -y aria2
