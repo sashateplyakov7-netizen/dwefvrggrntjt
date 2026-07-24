@@ -8,58 +8,53 @@ from urllib.parse import urlparse, parse_qs
 from config import MAX_FILE_SIZE, SUPPORTED_PLATFORMS
 
 # ==========================================
-# КУКИ — АВТОМАТИЧЕСКИ ПОДГРУЖАЮТСЯ
+# КУКИ — ПРОВЕРЯЕМ И ПРОПУСКАЕМ, ЕСЛИ НЕ РАБОТАЮТ
 # ==========================================
 COOKIES_FILE = "DeepLegs" if os.path.exists("DeepLegs") else None
 
 if COOKIES_FILE:
-    print(f"🍪 Куки загружены из файла: {COOKIES_FILE}")
-else:
-    print("⚠️ DeepLegs не найден. YouTube может не работать.")
+    try:
+        # Проверяем размер файла
+        if os.path.getsize(COOKIES_FILE) > 500:
+            print(f"🍪 Куки загружены из файла: {COOKIES_FILE}")
+        else:
+            print(f"⚠️ Файл кук повреждён или пустой, пропускаем...")
+            COOKIES_FILE = None
+    except:
+        print(f"⚠️ Ошибка чтения файла кук, пропускаем...")
+        COOKIES_FILE = None
+
+if not COOKIES_FILE:
+    print("⚠️ Куки не найдены — YouTube может работать медленнее")
 
 # ==========================================
-# 🧠 ФУНКЦИЯ ПОЛУЧЕНИЯ СВЕЖИХ КУК (ytc + Playwright)
+# 🧠 ФУНКЦИЯ ПОЛУЧЕНИЯ СВЕЖИХ КУК (ПРОПУСКАЕТ ОШИБКИ)
 # ==========================================
 def get_youtube_cookies() -> dict:
     """
     Пытается получить свежие куки для YouTube.
-    Сначала пробует ytc, потом файл, потом Playwright.
-    Возвращает словарь с куками или None.
+    Если не получается — возвращает None.
     """
     try:
         import ytc
         cookies_str = ytc.youtube()
-        if cookies_str:
+        if cookies_str and len(cookies_str) > 100:
             print("🍪 Куки обновлены через ytc")
             return {'http_headers': {'Cookie': cookies_str}}
     except Exception as e:
         print(f"⚠️ ytc не сработал: {e}")
     
-    if COOKIES_FILE:
+    if COOKIES_FILE and os.path.exists(COOKIES_FILE):
         try:
-            with open(COOKIES_FILE, 'r') as f:
-                cookies_str = f.read().strip()
-                if cookies_str:
-                    print(f"🍪 Куки загружены из файла: {COOKIES_FILE}")
-                    return {'cookiefile': COOKIES_FILE}
+            if os.path.getsize(COOKIES_FILE) > 500:
+                print(f"🍪 Используем файл кук: {COOKIES_FILE}")
+                return {'cookiefile': COOKIES_FILE}
+            else:
+                print(f"⚠️ Файл кук слишком маленький, пропускаем...")
         except:
-            pass
+            print(f"⚠️ Ошибка чтения файла кук, пропускаем...")
     
-    # Резерв: попытка через Playwright (если файла нет или он устарел)
-    try:
-        import subprocess
-        result = subprocess.run(
-            ['python', 'cookie_updater.py'],
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
-        if result.returncode == 0 and os.path.exists(COOKIES_FILE):
-            print("🍪 Куки обновлены через Playwright")
-            return {'cookiefile': COOKIES_FILE}
-    except Exception as e:
-        print(f"⚠️ Playwright не сработал: {e}")
-    
+    # 🔥 ВСЕГДА ВОЗВРАЩАЕМ None, ЕСЛИ НЕТ КУК
     return None
 
 # ==========================================
@@ -172,7 +167,6 @@ def universal_fallback(url: str, output_path: str) -> bool:
     try:
         print("🔄 Универсальный обходной путь...", flush=True)
         
-        # Пробуем с максимально простыми опциями
         ydl_opts = {
             'format': 'best',
             'outtmpl': output_path,
@@ -188,7 +182,6 @@ def universal_fallback(url: str, output_path: str) -> bool:
             'retries': 3,
         }
         
-        # Пробуем через стандартный yt-dlp
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
         
@@ -196,7 +189,6 @@ def universal_fallback(url: str, output_path: str) -> bool:
             print(f"✅ Универсальный обходной путь сработал!", flush=True)
             return True
         
-        # Если не сработало, пробуем через requests (для прямых ссылок)
         import requests
         print("🔄 Пробуем прямой запрос...", flush=True)
         headers = {'User-Agent': random.choice(USER_AGENTS)}
@@ -226,14 +218,12 @@ def fallback_youtube(url: str, output_path: str) -> bool:
     try:
         print("🔄 YouTube fallback...", flush=True)
         
-        # Извлекаем ID видео
         match = re.search(r"(?:v=|/)([a-zA-Z0-9_-]{11})", url)
         if not match:
             return False
         
         video_id = match.group(1)
         
-        # Пробуем через альтернативный URL
         alt_urls = [
             f"https://www.youtube.com/watch?v={video_id}",
             f"https://youtu.be/{video_id}",
@@ -277,7 +267,6 @@ def fallback_tiktok(url: str, output_path: str) -> bool:
         import requests
         print("🔄 TikTok fallback...", flush=True)
         
-        # Пробуем через TikWM API
         api_url = f"https://www.tikwm.com/api/?url={url}"
         response = requests.get(api_url, timeout=10)
         
@@ -591,28 +580,27 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
     
     format_str = get_format_for_quality(quality)
     
-    # 🔥 УСКОРЕННЫЕ НАСТРОЙКИ
     ydl_opts = {
         'format': format_str,
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
-        'max_filesize': 200 * 1024 * 1024,  # 200 МБ
-        'concurrent_fragment_downloads': 10,  # 🔥 БЫЛО 5 → СТАЛО 10
-        'socket_timeout': 15,                # 🔥 БЫЛО 30 → СТАЛО 15
-        'retries': 3,                        # 🔥 БЫЛО 15 → СТАЛО 3
-        'fragment_retries': 3,               # 🔥 БЫЛО 15 → СТАЛО 3
+        'max_filesize': 200 * 1024 * 1024,
+        'concurrent_fragment_downloads': 10,
+        'socket_timeout': 15,
+        'retries': 3,
+        'fragment_retries': 3,
         'skip_unavailable_fragments': True,
         'ignoreerrors': True,
         'extract_flat': False,
         'prefer_ffmpeg': True,
         'ffmpeg_location': '/usr/bin/ffmpeg' if os.name != 'nt' else None,
-        'sleep_interval': 0.5,               # 🔥 БЫЛО 1 → СТАЛО 0.5
-        'max_sleep_interval': 2,             # 🔥 БЫЛО 5 → СТАЛО 2
+        'sleep_interval': 0.5,
+        'max_sleep_interval': 2,
         'user_agent': random.choice(USER_AGENTS),
-        'external_downloader': 'aria2c',     # 🔥 МНОГОПОТОЧНЫЙ СКАЧИВАТЕЛЬ
-        'external_downloader_args': ['-x', '16', '-s', '16', '-k', '1M'],  # 🔥 16 ПОТОКОВ
+        'external_downloader': 'aria2c',
+        'external_downloader_args': ['-x', '16', '-s', '16', '-k', '1M'],
     }
     
     if is_shorts:
@@ -625,11 +613,15 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
     if PROXY_URL:
         ydl_opts['proxy'] = PROXY_URL
     
-    # 🔥 КУКИ ДЛЯ YOUTUBE
+    # 🔥 КУКИ ДЛЯ YOUTUBE (ПРОПУСКАЕМ ОШИБКИ)
     if platform in ["youtube.com", "youtu.be"] or is_shorts:
-        cookies = get_youtube_cookies()
-        if cookies:
-            ydl_opts.update(cookies)
+        try:
+            cookies = get_youtube_cookies()
+            if cookies:
+                ydl_opts.update(cookies)
+        except Exception as e:
+            print(f"⚠️ Ошибка получения кук, продолжаем без них: {e}")
+        
         ydl_opts['http_headers'] = {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -669,7 +661,7 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
             break
     
     # ==========================================
-    # 🔥 5 ПОПЫТОК СКАЧИВАНИЯ (УСКОРЕННЫЕ)
+    # 🔥 5 ПОПЫТОК СКАЧИВАНИЯ
     # ==========================================
     
     # 1️⃣ СТАНДАРТНАЯ
@@ -696,19 +688,18 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
         print(f"❌ [2] Ошибка: {e}", flush=True)
     
     # 3️⃣ БЕЗ КУК
-    if COOKIES_FILE or 'cookiefile' in ydl_opts:
-        try:
-            print(f"📥 [3] Без кук...", flush=True)
-            no_cookies_opts = ydl_opts.copy()
-            no_cookies_opts.pop('cookiefile', None)
-            no_cookies_opts.pop('http_headers', None)
-            no_cookies_opts['format'] = 'best'
-            with yt_dlp.YoutubeDL(no_cookies_opts) as ydl:
-                ydl.download([url])
-            if os.path.exists(output_path):
-                return True
-        except Exception as e:
-            print(f"❌ [3] Ошибка: {e}", flush=True)
+    try:
+        print(f"📥 [3] Без кук...", flush=True)
+        no_cookies_opts = ydl_opts.copy()
+        no_cookies_opts.pop('cookiefile', None)
+        no_cookies_opts.pop('http_headers', None)
+        no_cookies_opts['format'] = 'best'
+        with yt_dlp.YoutubeDL(no_cookies_opts) as ydl:
+            ydl.download([url])
+        if os.path.exists(output_path):
+            return True
+    except Exception as e:
+        print(f"❌ [3] Ошибка: {e}", flush=True)
     
     # 4️⃣ СПЕЦИАЛЬНЫЙ ОБХОДНОЙ ПУТЬ ДЛЯ ПЛАТФОРМЫ
     print(f"📥 [4] Обходной путь для {platform}...", flush=True)
@@ -755,16 +746,12 @@ async def download_media(url: str, output_path: str, quality: str = "best") -> b
     return await asyncio.to_thread(_sync_download, url, output_path, quality)
 
 # ==========================================
-# 🎵 СКАЧИВАНИЕ АУДИО (С ОБХОДНЫМИ ПУТЯМИ И ТАЙМАУТОМ)
+# 🎵 СКАЧИВАНИЕ АУДИО
 # ==========================================
 def _sync_download_audio(url: str, output_path: str) -> bool:
-    """
-    Синхронная загрузка только аудио с обходными путями.
-    """
     try:
         print(f"🎵 Скачиваю аудио: {url}", flush=True)
         
-        # 1️⃣ ПЕРВАЯ ПОПЫТКА — СТАНДАРТНАЯ
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': output_path,
@@ -796,7 +783,6 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
             print(f"✅ Аудио скачано: {output_path}", flush=True)
             return True
         
-        # 2️⃣ ВТОРАЯ ПОПЫТКА — БЕЗ ПОСТПРОЦЕССОРА (скачать как есть)
         print("🔄 [2] Пробуем скачать аудио без конвертации...", flush=True)
         ydl_opts_no_convert = {
             'format': 'bestaudio/best',
@@ -818,7 +804,6 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
         
         m4a_path = output_path.replace('.mp3', '.m4a')
         if os.path.exists(m4a_path):
-            # Пробуем конвертировать через ffmpeg
             try:
                 import subprocess
                 subprocess.run(['ffmpeg', '-i', m4a_path, '-acodec', 'libmp3lame', '-ab', '192k', output_path], 
@@ -829,16 +814,13 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
                     return True
             except Exception as e:
                 print(f"⚠️ Ошибка конвертации: {e}", flush=True)
-                # Если не сконвертировалось, оставляем как m4a
                 if os.path.exists(m4a_path):
                     os.rename(m4a_path, output_path)
                     return True
         
-        # 3️⃣ ТРЕТЬЯ ПОПЫТКА — ЧЕРЕЗ YOUTUBE AUDIO API (для YouTube)
         if "youtube.com" in url or "youtu.be" in url:
             print("🔄 [3] Пробуем через альтернативный метод...", flush=True)
             try:
-                # Пробуем другой формат
                 alt_opts = {
                     'format': 'bestaudio[ext=m4a]/bestaudio',
                     'outtmpl': output_path,
@@ -867,9 +849,6 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
         return False
 
 async def download_audio(url: str, output_path: str) -> bool:
-    """
-    Асинхронная загрузка аудио с таймаутом 60 секунд.
-    """
     print(f"🎵 download_audio: {url}")
     try:
         return await asyncio.wait_for(
@@ -881,13 +860,9 @@ async def download_audio(url: str, output_path: str) -> bool:
         return False
 
 # ==========================================
-# ✂️ СКАЧИВАНИЕ С ОБРЕЗКОЙ (ДЛЯ ПРЕМИУМ)
+# ✂️ СКАЧИВАНИЕ С ОБРЕЗКОЙ
 # ==========================================
 def _sync_download_with_cut(url: str, output_path: str, start_time: str = None, end_time: str = None) -> bool:
-    """
-    Скачивает видео и обрезает по времени.
-    start_time, end_time — в формате "MM:SS" или "HH:MM:SS"
-    """
     try:
         print(f"✂️ Скачивание с обрезкой: {start_time} - {end_time}", flush=True)
         
@@ -946,13 +921,10 @@ def _sync_download_with_cut(url: str, output_path: str, start_time: str = None, 
         return False
 
 async def download_media_with_cut(url: str, output_path: str, start_time: str = None, end_time: str = None) -> bool:
-    """
-    Асинхронная загрузка с обрезкой по времени.
-    """
     return await asyncio.to_thread(_sync_download_with_cut, url, output_path, start_time, end_time)
 
 # ==========================================
-# ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО (УСКОРЕННОЕ)
+# ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО
 # ==========================================
 def extract_video_info(url: str) -> dict:
     is_shorts = "shorts/" in url or "/shorts/" in url
@@ -960,7 +932,7 @@ def extract_video_info(url: str) -> dict:
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        'extract_flat': True,  # 🔥 БЫСТРО
+        'extract_flat': True,
         'user_agent': random.choice(USER_AGENTS),
         'http_headers': {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -968,8 +940,8 @@ def extract_video_info(url: str) -> dict:
             'Accept-Language': 'en-US,en;q=0.9',
             'Connection': 'keep-alive',
         },
-        'socket_timeout': 10,  # 🔥 БЫЛО 30 → СТАЛО 10
-        'retries': 2,          # 🔥 МЕНЬШЕ ПОПЫТОК
+        'socket_timeout': 10,
+        'retries': 2,
     }
     
     if is_shorts:
@@ -980,7 +952,11 @@ def extract_video_info(url: str) -> dict:
         })
     
     if COOKIES_FILE:
-        ydl_opts['cookiefile'] = COOKIES_FILE
+        try:
+            if os.path.exists(COOKIES_FILE) and os.path.getsize(COOKIES_FILE) > 500:
+                ydl_opts['cookiefile'] = COOKIES_FILE
+        except:
+            pass
     
     if "youtube.com" in url or "youtu.be" in url:
         ydl_opts['http_headers'].update({
@@ -1043,7 +1019,7 @@ def extract_video_info(url: str) -> dict:
                 "extractor": extractor
             }
     except Exception as e:
-        print(f"❌ Ошибка извлечения: {e}", flush=True)
+        print(f"⚠️ Ошибка извлечения: {e}", flush=True)
         return get_empty_info(url)
 
 def get_empty_info(url: str) -> dict:
