@@ -39,7 +39,7 @@ async def init_db():
             """)
             
             if not table_exists:
-                # Создаём таблицу с нуля
+                # Создаем таблицу с нуля
                 await conn.execute("""
                     CREATE TABLE users (
                         user_id BIGINT PRIMARY KEY,
@@ -70,8 +70,10 @@ async def init_db():
                 """)
                 existing_columns = [col['column_name'] for col in columns]
                 
-                # Список всех необходимых колонок
+                # 🔥 ВСЕ КОЛОНКИ, КОТОРЫЕ ДОЛЖНЫ БЫТЬ
                 required_columns = {
+                    'sub_start_date': 'VARCHAR(20)',
+                    'sub_end_date': 'VARCHAR(20)',
                     'total_downloads': 'INT DEFAULT 0',
                     'tariff': "VARCHAR(20) DEFAULT 'free'",
                     'invited_by': 'BIGINT DEFAULT 0',
@@ -87,7 +89,7 @@ async def init_db():
                         await conn.execute(f"""
                             ALTER TABLE users ADD COLUMN {col_name} {col_type}
                         """)
-                        print(f"✅ Добавлена колонка {col_name}", flush=True)
+                        print(f"✅ Добавлена колонка: {col_name}", flush=True)
         
         print("✅ База данных успешно подключена и таблицы созданы!", flush=True)
         
@@ -178,7 +180,6 @@ async def get_or_create_user(user_id: int):
             "free_premium_used": free_premium_used
         }
 
-# ... ВСЁ ОСТАЛЬНОЕ БЕЗ ИЗМЕНЕНИЙ (функции остаются те же)
 async def increment_downloads(user_id: int):
     today = datetime.now().strftime("%Y-%m-%d")
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -291,7 +292,6 @@ async def process_referral(new_user_id: int, referrer_id: int) -> str:
         return "❌ Нельзя пригласить самого себя!"
     
     async with pool.acquire() as conn:
-        # Проверяем, не был ли уже приглашён пользователь
         new_user = await conn.fetchrow(
             "SELECT invited_by FROM users WHERE user_id = $1",
             new_user_id
@@ -299,19 +299,16 @@ async def process_referral(new_user_id: int, referrer_id: int) -> str:
         if new_user and new_user["invited_by"] != 0:
             return "ℹ️ Ты уже был приглашён другим пользователем."
         
-        # Связываем нового пользователя с реферером
         await conn.execute(
             "UPDATE users SET invited_by = $1 WHERE user_id = $2",
             referrer_id, new_user_id
         )
         
-        # Обновляем счётчик рефералов у реферера
         await conn.execute(
             "UPDATE users SET referral_count = referral_count + 1 WHERE user_id = $1",
             referrer_id
         )
         
-        # Получаем текущее количество рефералов
         referrer = await conn.fetchrow(
             "SELECT referral_count, free_standard_used, free_premium_used FROM users WHERE user_id = $1",
             referrer_id
@@ -320,7 +317,6 @@ async def process_referral(new_user_id: int, referrer_id: int) -> str:
         count = referrer["referral_count"] if referrer else 0
         messages = []
         
-        # 🎁 Награда за 1 реферала — Стандарт на месяц
         if count >= 1 and referrer and referrer["free_standard_used"] == 0:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
@@ -331,7 +327,6 @@ async def process_referral(new_user_id: int, referrer_id: int) -> str:
             )
             messages.append("🎁 **Ты получил тариф СТАНДАРТ на 30 дней за 1 приглашение!**")
         
-        # 💎 Награда за 3 реферала — Премиум на месяц
         if count >= 3 and referrer and referrer["free_premium_used"] == 0:
             now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             end_date = (datetime.now() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
@@ -475,7 +470,6 @@ async def update_user_tariff(user_id: int, tariff_key: str):
         )
 
 async def save_payment_label(user_id: int, label: str, tariff_key: str):
-    """Сохраняет label платежа для последующей проверки"""
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE users SET pending_payment_label = $1, pending_tariff = $2 WHERE user_id = $3",
@@ -483,7 +477,6 @@ async def save_payment_label(user_id: int, label: str, tariff_key: str):
         )
 
 async def get_pending_payment(user_id: int):
-    """Получает ожидающий платеж пользователя"""
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT pending_payment_label, pending_tariff FROM users WHERE user_id = $1",
@@ -497,7 +490,6 @@ async def get_pending_payment(user_id: int):
         return None
 
 async def clear_pending_payment(user_id: int):
-    """Очищает ожидающий платеж пользователя"""
     async with pool.acquire() as conn:
         await conn.execute(
             "UPDATE users SET pending_payment_label = NULL, pending_tariff = NULL WHERE user_id = $1",
