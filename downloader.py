@@ -748,15 +748,16 @@ async def download_media(url: str, output_path: str, quality: str = "best") -> b
     return await asyncio.to_thread(_sync_download, url, output_path, quality)
 
 # ==========================================
-# 🎵 СКАЧИВАНИЕ АУДИО
+# 🎵 СКАЧИВАНИЕ АУДИО (С ОБХОДНЫМИ ПУТЯМИ И ТАЙМАУТОМ)
 # ==========================================
 def _sync_download_audio(url: str, output_path: str) -> bool:
     """
-    Синхронная загрузка только аудио.
+    Синхронная загрузка только аудио с обходными путями.
     """
     try:
         print(f"🎵 Скачиваю аудио: {url}", flush=True)
         
+        # 1️⃣ ПЕРВАЯ ПОПЫТКА — СТАНДАРТНАЯ
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': output_path,
@@ -788,6 +789,70 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
             print(f"✅ Аудио скачано: {output_path}", flush=True)
             return True
         
+        # 2️⃣ ВТОРАЯ ПОПЫТКА — БЕЗ ПОСТПРОЦЕССОРА (скачать как есть)
+        print("🔄 [2] Пробуем скачать аудио без конвертации...", flush=True)
+        ydl_opts_no_convert = {
+            'format': 'bestaudio/best',
+            'outtmpl': output_path.replace('.mp3', '.m4a'),
+            'quiet': True,
+            'no_warnings': True,
+            'noplaylist': True,
+            'socket_timeout': 30,
+            'retries': 10,
+            'user_agent': random.choice(USER_AGENTS),
+        }
+        
+        if "youtube.com" in url or "youtu.be" in url:
+            if COOKIES_FILE:
+                ydl_opts_no_convert['cookiefile'] = COOKIES_FILE
+        
+        with yt_dlp.YoutubeDL(ydl_opts_no_convert) as ydl:
+            ydl.download([url])
+        
+        m4a_path = output_path.replace('.mp3', '.m4a')
+        if os.path.exists(m4a_path):
+            # Пробуем конвертировать через ffmpeg
+            try:
+                import subprocess
+                subprocess.run(['ffmpeg', '-i', m4a_path, '-acodec', 'libmp3lame', '-ab', '192k', output_path], 
+                             capture_output=True, timeout=60)
+                if os.path.exists(output_path):
+                    os.remove(m4a_path)
+                    print(f"✅ Аудио сконвертировано в MP3: {output_path}", flush=True)
+                    return True
+            except Exception as e:
+                print(f"⚠️ Ошибка конвертации: {e}", flush=True)
+                # Если не сконвертировалось, оставляем как m4a
+                if os.path.exists(m4a_path):
+                    os.rename(m4a_path, output_path)
+                    return True
+        
+        # 3️⃣ ТРЕТЬЯ ПОПЫТКА — ЧЕРЕЗ YOUTUBE AUDIO API (для YouTube)
+        if "youtube.com" in url or "youtu.be" in url:
+            print("🔄 [3] Пробуем через альтернативный метод...", flush=True)
+            try:
+                # Пробуем другой формат
+                alt_opts = {
+                    'format': 'bestaudio[ext=m4a]/bestaudio',
+                    'outtmpl': output_path,
+                    'quiet': True,
+                    'no_warnings': True,
+                    'noplaylist': True,
+                    'socket_timeout': 30,
+                    'retries': 10,
+                    'user_agent': random.choice(USER_AGENTS),
+                }
+                if COOKIES_FILE:
+                    alt_opts['cookiefile'] = COOKIES_FILE
+                
+                with yt_dlp.YoutubeDL(alt_opts) as ydl:
+                    ydl.download([url])
+                
+                if os.path.exists(output_path):
+                    return True
+            except:
+                pass
+        
         return False
         
     except Exception as e:
@@ -796,10 +861,18 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
 
 async def download_audio(url: str, output_path: str) -> bool:
     """
-    Асинхронная загрузка аудио.
+    Асинхронная загрузка аудио с таймаутом 120 секунд.
     """
     print(f"🎵 download_audio: {url}")
-    return await asyncio.to_thread(_sync_download_audio, url, output_path)
+    try:
+        # Добавляем таймаут 120 секунд
+        return await asyncio.wait_for(
+            asyncio.to_thread(_sync_download_audio, url, output_path),
+            timeout=120
+        )
+    except asyncio.TimeoutError:
+        print(f"❌ Таймаут скачивания аудио (120 сек)", flush=True)
+        return False
 
 # ==========================================
 # ✂️ СКАЧИВАНИЕ С ОБРЕЗКОЙ (ДЛЯ ПРЕМИУМ)
