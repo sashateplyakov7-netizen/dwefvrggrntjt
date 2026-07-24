@@ -25,47 +25,66 @@ TARIFFS = {
         "price": 0,
         "daily_limit": 3,
         "platforms": ["tiktok", "instagram", "pinterest"],
-        "max_duration": 60,  # секунд
-        "max_size": 30,      # МБ
+        "max_duration": 60,
+        "max_size": 30,
         "quality": "medium"
     },
     "standard": {
         "name": "Стандарт",
-        "price": 1,        # 100 рублей
+        "price": 1,
         "daily_limit": 30,
-        "platforms": ["tiktok", "instagram", "youtube", "pinterest", "twitter", "facebook", "reddit", "vimeo"],
+        # 🔥 5 ПЛАТФОРМ (БЕЗ YOUTUBE!)
+        "platforms": ["tiktok", "instagram", "pinterest", "twitter", "facebook"],
         "max_duration": 300,
         "max_size": 50,
         "quality": "high"
     },
     "premium": {
         "name": "Премиум",
-        "price": 1,        # 300 рублей
-        "daily_limit": 9999, # Безлимит
-        "platforms": ["all"],
+        "price": 1,
+        "daily_limit": 9999,
+        # 🔥 ВСЕ ПЛАТФОРМЫ (ПОЛНЫЙ СПИСОК)
+        "platforms": [
+            "tiktok",
+            "instagram",
+            "youtube",
+            "pinterest",
+            "twitter",
+            "facebook",
+            "reddit",
+            "vimeo",
+            "t.me",
+            "vk",
+            "likee",
+            "rutube",
+            "twitch",
+            "coub",
+            "tumblr",
+            "dailymotion",
+            "9gag"
+        ],
         "max_duration": 3600,
         "max_size": 200,
         "quality": "best"
     }
 }
 
-# Цены для Telegram Stars (в звёздах)
-# 1 звезда = 2 рубля (комиссия Telegram ~30%)
+# Цены для Telegram Stars
 TARIFF_STARS = {
-    "standard": 50,   # 100 руб / 2 = 50 звёзд
-    "premium": 150,   # 300 руб / 2 = 150 звёзд
+    "standard": 50,
+    "premium": 150,
 }
 
 # ==========================================
 # ДОПОЛНИТЕЛЬНЫЕ НАСТРОЙКИ
 # ==========================================
 DEFAULT_TARIFF = "free"
-SUB_DURATION_DAYS = 30  # Длительность подписки в днях
-MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 МБ для yt-dlp
-MAX_HQ_FILE_SIZE = 200 * 1024 * 1024  # 200 МБ для премиума
+SUB_DURATION_DAYS = 30
+MAX_FILE_SIZE = 50 * 1024 * 1024
+MAX_HQ_FILE_SIZE = 200 * 1024 * 1024
 
 # ==========================================
-# 🔥 ВСЕ ПОДДЕРЖИВАЕМЫЕ ПЛАТФОРМЫ
+# 🔥 ВСЕ ПОДДЕРЖИВАЕМЫЕ ПЛАТФОРМЫ (ДЛЯ DETECT_PLATFORM)
 # ==========================================
 SUPPORTED_PLATFORMS = [
     "tiktok.com",
@@ -93,15 +112,15 @@ SUPPORTED_PLATFORMS = [
 # ==========================================
 # 🔥 ИМЯ БОТА ДЛЯ РЕФЕРАЛЬНЫХ ССЫЛОК
 # ==========================================
-BOT_USERNAME = "Downloader_Dowo_Bot"  # БЕЗ @
+BOT_USERNAME = "Downloader_Dowo_Bot"
 
 # ==========================================
-# 💳 ЮMONEY (ДОБАВЛЕНО)
+# 💳 ЮMONEY
 # ==========================================
-YOOMONEY_SHOP_ID = os.getenv("YOOMONEY_SHOP_ID")        # ID магазина
-YOOMONEY_SECRET_KEY = os.getenv("YOOMONEY_SECRET_KEY")  # Секретный ключ
-YOOMONEY_TOKEN = os.getenv("YOOMONEY_TOKEN")            # Токен для API (опционально)
-YOOMONEY_WALLET = os.getenv("YOOMONEY_WALLET")          # Номер кошелька (опционально)
+YOOMONEY_SHOP_ID = os.getenv("YOOMONEY_SHOP_ID")
+YOOMONEY_SECRET_KEY = os.getenv("YOOMONEY_SECRET_KEY")
+YOOMONEY_TOKEN = os.getenv("YOOMONEY_TOKEN")
+YOOMONEY_WALLET = os.getenv("YOOMONEY_WALLET")
 YOOMONEY_REDIRECT_URI = os.getenv("YOOMONEY_REDIRECT_URI", "https://t.me/Downloader_Dowo_Bot")
 
 # ==========================================
