@@ -80,15 +80,17 @@ USER_AGENTS = [
 ]
 
 # ==========================================
-# ОПРЕДЕЛЕНИЕ ПЛАТФОРМЫ ПО ССЫЛКЕ
+# 🔥 РАСШИРЕННОЕ ОПРЕДЕЛЕНИЕ ПЛАТФОРМЫ
 # ==========================================
 def detect_platform(url: str) -> str:
     url_lower = url.lower()
+    
+    # 1️⃣ ПРЯМОЕ СОВПАДЕНИЕ
     for platform in SUPPORTED_PLATFORMS:
         if platform in url_lower:
             return platform
     
-    # 🔥 ЕСЛИ НЕ НАШЛИ — ПЫТАЕМСЯ ПО ДОМЕНУ
+    # 2️⃣ ПО ДОМЕНУ
     try:
         from urllib.parse import urlparse
         domain = urlparse(url).netloc.lower()
@@ -121,6 +123,31 @@ def detect_platform(url: str) -> str:
                 return value
     except:
         pass
+    
+    # 3️⃣ ПО ПАТТЕРНАМ В URL
+    patterns = {
+        r'tiktok\.com/@[\w\.]+/video/': 'tiktok.com',
+        r'tiktok\.com/@[\w\.]+': 'tiktok.com',
+        r'instagram\.com/(?:p|reel|tv)/': 'instagram.com',
+        r'youtube\.com/shorts/': 'youtube.com',
+        r'youtu\.be/': 'youtu.be',
+        r'pinterest\.com/pin/': 'pinterest.com',
+        r'twitter\.com/\w+/status/': 'twitter.com',
+        r'x\.com/\w+/status/': 'x.com',
+        r'facebook\.com/.*?/videos/': 'facebook.com',
+        r'reddit\.com/r/.*?/comments/': 'reddit.com',
+        r'vimeo\.com/\d+': 'vimeo.com',
+        r't\.me/': 't.me',
+        r'vk\.com/video': 'vk.com',
+        r'rutube\.ru/video/': 'rutube.ru',
+        r'twitch\.tv/': 'twitch.tv',
+        r'dailymotion\.com/video/': 'dailymotion.com',
+        r'9gag\.com/': '9gag.com',
+    }
+    
+    for pattern, platform in patterns.items():
+        if re.search(pattern, url_lower):
+            return platform
     
     return "unknown"
 
@@ -637,7 +664,7 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
             break
     
     # ==========================================
-    # 🔥 4 ПОПЫТКИ СКАЧИВАНИЯ
+    # 🔥 5 ПОПЫТОК СКАЧИВАНИЯ
     # ==========================================
     
     # 1️⃣ СТАНДАРТНАЯ
@@ -723,7 +750,7 @@ async def download_media(url: str, output_path: str, quality: str = "best") -> b
     return await asyncio.to_thread(_sync_download, url, output_path, quality)
 
 # ==========================================
-# ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО
+# ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО (С ПРОВЕРКОЙ ПЛАТФОРМ)
 # ==========================================
 def extract_video_info(url: str) -> dict:
     is_shorts = "shorts/" in url or "/shorts/" in url
@@ -765,12 +792,47 @@ def extract_video_info(url: str) -> dict:
             if not info:
                 return get_empty_info(url)
             
-            # 🔥 ОПРЕДЕЛЯЕМ ПЛАТФОРМУ
+            # 🔥 ОПРЕДЕЛЯЕМ ПЛАТФОРМУ С ПРОВЕРКОЙ
             platform = detect_platform(url)
             
-            # 🔥 ДЛЯ YOUTUBE ПРОВЕРЯЕМ extractor
-            if info.get('extractor') == 'youtube' or 'youtube.com' in url or 'youtu.be' in url:
-                platform = 'youtube.com'
+            # 🔥 ПРОВЕРЯЕМ EXTRACTOR
+            extractor = info.get('extractor', 'unknown')
+            
+            # 🔥 КАРТА СООТВЕТСТВИЯ
+            platform_map = {
+                'youtube': 'youtube.com',
+                'youtubedee': 'youtube.com',
+                'instagram': 'instagram.com',
+                'tiktok': 'tiktok.com',
+                'pinterest': 'pinterest.com',
+                'twitter': 'twitter.com',
+                'x': 'x.com',
+                'facebook': 'facebook.com',
+                'reddit': 'reddit.com',
+                'vimeo': 'vimeo.com',
+                'telegram': 't.me',
+                'vk': 'vk.com',
+                'vkontakte': 'vk.com',
+                'likee': 'likee.com',
+                'rutube': 'rutube.ru',
+                'twitch': 'twitch.tv',
+                'coub': 'coub.com',
+                'tumblr': 'tumblr.com',
+                'dailymotion': 'dailymotion.com',
+                '9gag': '9gag.com',
+            }
+            
+            # 🔥 ЕСЛИ EXTRACTOR ИЗВЕСТЕН — ИСПОЛЬЗУЕМ ЕГО
+            if extractor in platform_map:
+                platform = platform_map[extractor]
+            # 🔥 ЕСЛИ ВСЁ ЕЩЁ UNKNOWN — ПРОБУЕМ ПО ДОМЕНУ
+            elif platform == 'unknown':
+                from urllib.parse import urlparse
+                domain = urlparse(url).netloc.lower()
+                for key, value in platform_map.items():
+                    if key in domain:
+                        platform = value
+                        break
             
             return {
                 "title": info.get('title', info.get('fulltitle', 'Неизвестно'))[:50],
@@ -780,7 +842,7 @@ def extract_video_info(url: str) -> dict:
                 "uploader": info.get('uploader', info.get('channel', 'Неизвестно')),
                 "thumbnail": info.get('thumbnail', None),
                 "platform": platform,
-                "extractor": info.get('extractor', 'unknown')
+                "extractor": extractor
             }
     except Exception as e:
         print(f"❌ Ошибка извлечения: {e}", flush=True)
@@ -837,7 +899,7 @@ async def download_media_with_progress(url: str, output_path: str, progress_call
 async def is_valid_url(url: str) -> bool:
     try:
         info = await asyncio.to_thread(extract_video_info, url)
-        return info.get("extractor") != "unknown"
+        return info.get("extractor") != "unknown" and info.get("platform") != "unknown"
     except Exception:
         return False
 
