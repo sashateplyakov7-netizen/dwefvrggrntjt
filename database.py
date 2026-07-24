@@ -249,6 +249,9 @@ async def get_user_tariff(user_id: int) -> str:
         
         return row["tariff"] if row["is_subscribed"] == 1 else DEFAULT_TARIFF
 
+# ==========================================
+# 🔥 ИСПРАВЛЕННАЯ ФУНКЦИЯ can_download
+# ==========================================
 async def can_download(user_id: int, platform: str) -> tuple[bool, str]:
     tariff_key = await get_user_tariff(user_id)
     tariff = TARIFFS.get(tariff_key, TARIFFS.get(DEFAULT_TARIFF))
@@ -257,8 +260,19 @@ async def can_download(user_id: int, platform: str) -> tuple[bool, str]:
         tariff = TARIFFS[DEFAULT_TARIFF]
     
     allowed_platforms = tariff.get("platforms", [])
-    if allowed_platforms != ["all"] and platform not in allowed_platforms:
-        return False, f"❌ Тариф «{tariff['name']}» не поддерживает {platform}.\n\n💡 Используй кнопку 'Выбрать тариф' для смены."
+    
+    # 🔥 ФИКС: если ["all"] — пропускаем проверку платформы
+    if allowed_platforms != ["all"]:
+        # Приводим platform к формату без .com для сравнения
+        platform_clean = platform.replace('.com', '').replace('.ru', '').replace('.tv', '').replace('.be', '')
+        # Проверяем, есть ли платформа в списке
+        platform_found = False
+        for p in allowed_platforms:
+            if p in platform or platform in p:
+                platform_found = True
+                break
+        if not platform_found:
+            return False, f"❌ Тариф «{tariff['name']}» не поддерживает {platform}.\n\n💡 Используй кнопку 'Выбрать тариф' для смены."
     
     if tariff["daily_limit"] == 9999:
         return True, ""
