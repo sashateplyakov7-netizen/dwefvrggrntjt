@@ -50,6 +50,11 @@ class AdminState(StatesGroup):
     waiting_for_answer_to_user = State()
 
 # ==========================================
+# КЭШ ДЛЯ URL (ИСПРАВЛЕНИЕ BUTTON_DATA_INVALID)
+# ==========================================
+download_cache = {}
+
+# ==========================================
 # КЛАВИАТУРЫ
 # ==========================================
 
@@ -78,9 +83,12 @@ def get_payment_keyboard(tariff_key: str):
         [InlineKeyboardButton(text="⭐ Оплатить звёздами", callback_data=f"pay_stars_{tariff_key}")]
     ]
     
-    # Кнопка с картой только для Премиума (с бонусом +3 дня)
+    # 🔥 КАРТА ДЛЯ ВСЕХ ТАРИФОВ
+    keyboard.append([InlineKeyboardButton(text="💳 Оплатить картой", callback_data=f"pay_card_{tariff_key}")])
+    
+    # 🔥 БОНУС +3 ДНЯ ТОЛЬКО ДЛЯ ПРЕМИУМ
     if tariff_key == "premium":
-        keyboard.append([InlineKeyboardButton(text="💳 Оплатить картой (+3 дня БЕСПЛАТНО!)", callback_data=f"pay_card_{tariff_key}")])
+        keyboard.append([InlineKeyboardButton(text="🎁 +3 дня БЕСПЛАТНО при оплате картой!", callback_data="noop")])
     
     keyboard.append([InlineKeyboardButton(text="🏠 Назад", callback_data="main_menu")])
     
@@ -109,6 +117,8 @@ def get_user_stats_keyboard():
 
 def get_quality_keyboard(qualities: list, url: str):
     """Клавиатура для выбора качества видео"""
+    global download_cache
+    
     buttons = []
     quality_names = {
         "sd": "📥 SD (480p)",
@@ -116,12 +126,15 @@ def get_quality_keyboard(qualities: list, url: str):
         "fullhd": "📥 Full HD (1080p)"
     }
     
+    # 🔥 ИСПОЛЬЗУЕМ ХЕШ ВМЕСТО URL (ЧТОБЫ НЕ БЫЛО BUTTON_DATA_INVALID)
+    url_hash = hashlib.md5(url.encode()).hexdigest()[:10]
+    download_cache[url_hash] = url
+    
     for q in qualities:
         if q in quality_names:
-            # Сохраняем URL в callback_data
             buttons.append([InlineKeyboardButton(
                 text=quality_names[q],
-                callback_data=f"download_{q}_{url[:50]}"
+                callback_data=f"dl_{q}_{url_hash}"
             )])
     
     buttons.append([InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")])
@@ -224,20 +237,20 @@ async def cmd_tariff(message: types.Message):
     await message.answer(
         "💎 **Выбери свой тариф:**\n\n"
         "📱 **Бесплатный** — 0 ₽\n"
-        "   • 3 скачивания в день\n"
+        "   • 3 скачивания в день — хватит, чтобы понять, что бот 🔥\n"
         "   • TikTok, Instagram, Pinterest\n"
-        "   • SD качество (480p)\n\n"
+        "   • SD качество (480p) — для быстрых просмотров\n\n"
         "⚡ **Стандарт** — 100 ₽/мес\n"
-        "   • 30 скачиваний в день\n"
+        "   • 30 скачиваний в день — для тех, кто не хочет ждать\n"
         "   • Все основные платформы\n"
-        "   • HD качество (720p)\n\n"
+        "   • HD качество (720p) — чётко и ясно\n\n"
         "💎 **Премиум** — 300 ₽/мес\n"
-        "   • ♾️ Безлимит скачиваний\n"
-        "   • Все платформы\n"
-        "   • Full HD качество (1080p)\n"
-        "   • Умный кэш (мгновенная выдача)\n"
-        "   • Приоритетная обработка\n\n"
-        "🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!",
+        "   • ♾️ Безлимит — качай сколько влезет!\n"
+        "   • Все платформы — даже те, о которых ты не знал\n"
+        "   • Full HD (1080p) — сочные детали\n"
+        "   • Умный кэш — видео вылетает мгновенно\n"
+        "   • Приоритетная обработка — ты король, все ждут тебя\n\n"
+        "🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО! Не веришь? Проверь!",
         parse_mode="Markdown",
         reply_markup=get_tariff_keyboard()
     )
@@ -257,20 +270,20 @@ async def cmd_stats(message: types.Message):
     if stats:
         text = (
             "📊 **Твоя статистика:**\n\n"
-            f"📥 Скачиваний сегодня: {stats['downloads_today']}\n"
-            f"📅 Всего скачиваний: {stats['total_downloads']}\n"
-            f"💎 Тариф: **{tariff_info['name']}**\n"
+            f"📥 Скачиваний сегодня: {stats['downloads_today']} — не слабо!\n"
+            f"📅 Всего скачиваний: {stats['total_downloads']} — гордись собой\n"
+            f"💎 Тариф: **{tariff_info['name']}** — ты на коне!\n"
             f"📊 Статус: {'🟢 Активна' if stats['is_subscribed'] == 1 else '🔴 Не активна'}\n"
             f"📅 Действует до: {stats['sub_end_date'] or 'Нет'}\n\n"
             f"📱 Доступно платформ: {len(tariff_info['platforms']) if tariff_info['platforms'] != ['all'] else 'Все'}\n"
             f"📊 Лимит в день: {tariff_info['daily_limit'] if tariff_info['daily_limit'] != 9999 else '∞'}\n\n"
             f"🎁 **Рефералы:**\n"
-            f"• Приглашено: {referral_info['count']} друзей\n"
+            f"• Приглашено: {referral_info['count']} друзей — ты популярен!\n"
             f"• Награда за 1 друга: {'✅ Получен' if referral_info['standard_used'] else '❌ Не получен'}\n"
             f"• Награда за 3 друзей: {'✅ Получен' if referral_info['premium_used'] else '❌ Не получен'}\n\n"
             f"🎉 **Акция:**\n"
             f"• Куплено Премиум: {premium_count} раз(а)\n"
-            f"• До бесплатного месяца: {3 - (premium_count % 3) if premium_count % 3 != 0 else 3} Премиум(а)"
+            f"• До бесплатного месяца: {3 - (premium_count % 3) if premium_count % 3 != 0 else 3} Премиум(а) — осталось чуть-чуть!"
         )
     else:
         text = "⚠️ Не удалось получить данные."
@@ -502,18 +515,18 @@ async def show_tariffs(callback: types.CallbackQuery):
     await callback.message.edit_text(
         "💎 **Тарифы**\n\n"
         "📱 **Бесплатный** — 0 ₽\n"
-        "   • 3 скачивания в день\n"
+        "   • 3 скачивания в день — хватит, чтобы понять, что бот 🔥\n"
         "   • TikTok, Instagram, Pinterest\n"
         "   • SD качество (480p)\n\n"
         "⚡ **Стандарт** — 100 ₽/мес\n"
-        "   • 30 скачиваний в день\n"
+        "   • 30 скачиваний в день — для тех, кто не хочет ждать\n"
         "   • Все основные платформы\n"
         "   • HD качество (720p)\n\n"
         "💎 **Премиум** — 300 ₽/мес\n"
-        "   • ♾️ Безлимит скачиваний\n"
+        "   • ♾️ Безлимит — качай сколько влезет!\n"
         "   • Все платформы\n"
-        "   • Full HD качество (1080p)\n"
-        "   • Умный кэш, приоритетная обработка\n\n"
+        "   • Full HD (1080p) — сочные детали\n"
+        "   • Умный кэш, приоритетная обработка — ты король!\n\n"
         "🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!",
         parse_mode="Markdown",
         reply_markup=get_tariff_keyboard()
@@ -532,12 +545,12 @@ async def my_stats_callback(callback: types.CallbackQuery):
     if stats:
         text = (
             "📊 **Твоя статистика**\n\n"
-            f"📥 Сегодня: {stats['downloads_today']}\n"
-            f"📅 Всего: {stats['total_downloads']}\n"
-            f"💎 Тариф: **{tariff_info['name']}**\n"
+            f"📥 Сегодня: {stats['downloads_today']} — не слабо!\n"
+            f"📅 Всего: {stats['total_downloads']} — гордись собой\n"
+            f"💎 Тариф: **{tariff_info['name']}** — ты на коне!\n"
             f"📊 Статус: {'🟢 Активна' if stats['is_subscribed'] == 1 else '🔴 Не активна'}\n"
             f"📅 Действует до: {stats['sub_end_date'] or 'Нет'}\n\n"
-            f"🎁 Приглашено: {referral_info['count']} друзей\n"
+            f"🎁 Приглашено: {referral_info['count']} друзей — ты популярен!\n"
             f"🎉 Куплено Премиум: {premium_count} раз(а)"
         )
     else:
@@ -763,7 +776,7 @@ async def process_tariff_selection(callback: types.CallbackQuery):
     if tariff_key == "free":
         await callback.message.edit_text(
             "📱 **Бесплатный тариф активен!**\n\n"
-            "3 скачивания в день.\n"
+            "3 скачивания в день — хватит, чтобы понять, что бот 🔥\n"
             "TikTok, Instagram, Pinterest\n\n"
             "🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!",
             parse_mode="Markdown",
@@ -783,7 +796,8 @@ async def process_tariff_selection(callback: types.CallbackQuery):
         f"💰 Цена: {tariff['price']} ₽\n"
         f"📊 Лимит: {tariff['daily_limit']} скачиваний/день\n"
         f"📱 Платформы: {', '.join(tariff['platforms']) if tariff['platforms'] != ['all'] else 'Все'}\n\n"
-        f"🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!",
+        f"🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!\n"
+        f"{'🎁 **Бонус:** +3 дня БЕСПЛАТНО при оплате картой!' if tariff_key == 'premium' else ''}",
         parse_mode="Markdown",
         reply_markup=get_payment_keyboard(tariff_key)
     )
@@ -830,11 +844,13 @@ async def process_pay_card(callback: types.CallbackQuery):
     # Используем переменную из config
     payment_link = f"https://yoomoney.ru/quickpay/confirm.xml?receiver={YOOMONEY_SHOP_ID}&quickpay-form=shop&targets=Подписка+{tariff['name']}&paymentType=SB&sum={tariff['price']}&label={payment_label}"
     
+    bonus_text = "\n\n🎁 **Бонус:** +3 дня к подписке БЕСПЛАТНО! 😈" if tariff_key == "premium" else ""
+    
     await callback.message.edit_text(
         f"💳 **Оплата через карту (ЮMoney)**\n\n"
         f"💎 Тариф: **{tariff['name']}**\n"
-        f"💰 Сумма: **{tariff['price']} ₽**\n\n"
-        f"🎁 **Бонус:** +3 дня к подписке БЕСПЛАТНО! 😈\n\n"
+        f"💰 Сумма: **{tariff['price']} ₽**\n"
+        f"{bonus_text}\n\n"
         f"🔗 **Ссылка для оплаты:**\n"
         f"`{payment_link}`\n\n"
         f"📌 После оплаты подписка активируется автоматически!",
@@ -978,22 +994,30 @@ async def handle_link(message: types.Message):
 # ==========================================
 # 🚀 ОБРАБОТЧИК ВЫБОРА КАЧЕСТВА
 # ==========================================
-@dp.callback_query(F.data.startswith("download_"))
+@dp.callback_query(F.data.startswith("dl_"))
 async def process_download_quality(callback: types.CallbackQuery):
-    user_id = callback.from_user.id
-    data = callback.data.replace("download_", "")
+    global download_cache
     
-    # Парсим качество и URL
+    user_id = callback.from_user.id
+    data = callback.data.replace("dl_", "")
+    
+    # Парсим качество и хеш
     parts = data.split("_", 1)
     if len(parts) < 2:
         await callback.answer("❌ Ошибка формата")
         return
     
     quality = parts[0]
-    url = parts[1][:40]  # Восстанавливаем URL (обрезанный)
+    url_hash = parts[1]
     
-    # Ищем полный URL в сообщении (костыль, лучше хранить в БД)
-    # Пока используем то, что есть
+    # Восстанавливаем URL из кэша
+    url = download_cache.get(url_hash)
+    if not url:
+        await callback.message.answer(
+            "❌ Ссылка устарела. Отправь видео заново.",
+            parse_mode="Markdown"
+        )
+        return
     
     await callback.answer(f"⏳ Начинаю скачивание в {quality.upper()}...")
     
@@ -1084,10 +1108,10 @@ async def yoomoney_webhook(request):
         datetime_str = data.get('datetime')
         sender = data.get('sender')
         codepro = data.get('codepro')
-        label = data.get('label')  # Наша метка: card_{tariff_key}_{user_id}_{timestamp}
+        label = data.get('label')
         sha1_hash = data.get('sha1_hash')
         
-        # Проверяем хеш (для безопасности)
+        # Проверяем хеш
         check_string = f"{notification_type}&{operation_id}&{amount}&{currency}&{datetime_str}&{sender}&{codepro}&{YOOMONEY_SECRET_KEY}&{label}"
         check_hash = hashlib.sha1(check_string.encode()).hexdigest()
         
@@ -1104,7 +1128,7 @@ async def yoomoney_webhook(request):
             if tariff_key == "premium":
                 await increment_paid_premium_count(user_id)
                 
-                # Проверяем акцию (каждый 3-й бесплатно)
+                # Проверяем акцию
                 if await is_free_premium_available(user_id):
                     await mark_free_premium_used(user_id)
                     await activate_free_premium(user_id)
@@ -1137,11 +1161,12 @@ async def yoomoney_webhook(request):
             tariff = TARIFFS.get(tariff_key, TARIFFS["standard"])
             
             # Отправляем уведомление пользователю
+            bonus_text = "\n🎁 Бонус: +3 дня к подписке!" if tariff_key == "premium" else ""
+            
             await bot.send_message(
                 user_id,
                 f"🎉 **Оплата через карту прошла успешно!**\n\n"
-                f"💎 Тариф «{tariff['name']}» активирован на 30 дней!\n"
-                f"🎁 Бонус: +3 дня к подписке!",
+                f"💎 Тариф «{tariff['name']}» активирован на 30 дней!{bonus_text}",
                 parse_mode="Markdown"
             )
             
@@ -1267,7 +1292,7 @@ async def start_dummy_server():
     app = web.Application()
     app.router.add_get("/", handle_healthcheck)
     app.router.add_get("/health", handle_healthcheck)
-    app.router.add_post("/yoomoney-webhook", yoomoney_webhook)  # 🔥 WEBHOOK ДЛЯ ЮMONEY
+    app.router.add_post("/yoomoney-webhook", yoomoney_webhook)
     runner = web.AppRunner(app)
     await runner.setup()
     port = int(os.getenv("PORT", 8080))
