@@ -30,7 +30,6 @@ async def init_db():
         )
         
         async with pool.acquire() as conn:
-            # Проверяем, существует ли таблица
             table_exists = await conn.fetchval("""
                 SELECT EXISTS (
                     SELECT 1 FROM information_schema.tables 
@@ -39,7 +38,6 @@ async def init_db():
             """)
             
             if not table_exists:
-                # Создаем таблицу с нуля
                 await conn.execute("""
                     CREATE TABLE users (
                         user_id BIGINT PRIMARY KEY,
@@ -57,12 +55,12 @@ async def init_db():
                         free_standard_used INT DEFAULT 0,
                         free_premium_used INT DEFAULT 0,
                         pending_payment_label VARCHAR(100),
-                        pending_tariff VARCHAR(20)
+                        pending_tariff VARCHAR(20),
+                        paid_premium_count INT DEFAULT 0
                     );
                 """)
                 print("✅ Таблица users создана!", flush=True)
             else:
-                # Проверяем наличие всех колонок и добавляем недостающие
                 columns = await conn.fetch("""
                     SELECT column_name 
                     FROM information_schema.columns 
@@ -70,7 +68,6 @@ async def init_db():
                 """)
                 existing_columns = [col['column_name'] for col in columns]
                 
-                # 🔥 ВСЕ КОЛОНКИ, КОТОРЫЕ ДОЛЖНЫ БЫТЬ
                 required_columns = {
                     'sub_start_date': 'VARCHAR(20)',
                     'sub_end_date': 'VARCHAR(20)',
@@ -81,7 +78,8 @@ async def init_db():
                     'free_standard_used': 'INT DEFAULT 0',
                     'free_premium_used': 'INT DEFAULT 0',
                     'pending_payment_label': 'VARCHAR(100)',
-                    'pending_tariff': 'VARCHAR(20)'
+                    'pending_tariff': 'VARCHAR(20)',
+                    'paid_premium_count': 'INT DEFAULT 0'
                 }
                 
                 for col_name, col_type in required_columns.items():
@@ -107,13 +105,13 @@ async def get_or_create_user(user_id: int):
     
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT downloads_today, total_downloads, last_download_date, tariff, is_subscribed, sub_start_date, sub_end_date, invited_by, referral_count, free_standard_used, free_premium_used FROM users WHERE user_id = $1", 
+            "SELECT downloads_today, total_downloads, last_download_date, tariff, is_subscribed, sub_start_date, sub_end_date, invited_by, referral_count, free_standard_used, free_premium_used, paid_premium_count FROM users WHERE user_id = $1", 
             user_id
         )
         
         if not row:
             await conn.execute(
-                "INSERT INTO users (user_id, downloads_today, total_downloads, last_download_date, tariff, is_subscribed, created_at, last_activity) VALUES ($1, 0, 0, $2, $3, 0, $4, $4)",
+                "INSERT INTO users (user_id, downloads_today, total_downloads, last_download_date, tariff, is_subscribed, created_at, last_activity, paid_premium_count) VALUES ($1, 0, 0, $2, $3, 0, $4, $4, 0)",
                 user_id, today, DEFAULT_TARIFF, now
             )
             return {
@@ -126,7 +124,8 @@ async def get_or_create_user(user_id: int):
                 "invited_by": 0,
                 "referral_count": 0,
                 "free_standard_used": 0,
-                "free_premium_used": 0
+                "free_premium_used": 0,
+                "paid_premium_count": 0
             }
         
         downloads_today = row["downloads_today"]
@@ -140,8 +139,8 @@ async def get_or_create_user(user_id: int):
         referral_count = row["referral_count"] or 0
         free_standard_used = row["free_standard_used"] or 0
         free_premium_used = row["free_premium_used"] or 0
+        paid_premium_count = row["paid_premium_count"] or 0
         
-        # Проверяем, не истекла ли подписка
         if is_subscribed == 1 and sub_end_date:
             try:
                 if datetime.now() > datetime.strptime(sub_end_date, "%Y-%m-%d %H:%M:%S"):
@@ -159,7 +158,6 @@ async def get_or_create_user(user_id: int):
                     DEFAULT_TARIFF, user_id
                 )
         
-        # Новый день — сбрасываем счетчик
         if last_date != today:
             downloads_today = 0
             await conn.execute(
@@ -177,7 +175,8 @@ async def get_or_create_user(user_id: int):
             "invited_by": invited_by,
             "referral_count": referral_count,
             "free_standard_used": free_standard_used,
-            "free_premium_used": free_premium_used
+            "free_premium_used": free_premium_used,
+            "paid_premium_count": paid_premium_count
         }
 
 async def increment_downloads(user_id: int):
@@ -203,7 +202,7 @@ async def activate_subscription(user_id: int, tariff_key: str = "standard"):
 async def get_user_stats(user_id: int):
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
-            "SELECT downloads_today, total_downloads, tariff, is_subscribed, sub_start_date, sub_end_date, invited_by, referral_count, free_standard_used, free_premium_used FROM users WHERE user_id = $1",
+            "SELECT downloads_today, total_downloads, tariff, is_subscribed, sub_start_date, sub_end_date, invited_by, referral_count, free_standard_used, free_premium_used, paid_premium_count FROM users WHERE user_id = $1",
             user_id
         )
         
@@ -220,11 +219,11 @@ async def get_user_stats(user_id: int):
             "invited_by": row["invited_by"] or 0,
             "referral_count": row["referral_count"] or 0,
             "free_standard_used": row["free_standard_used"] or 0,
-            "free_premium_used": row["free_premium_used"] or 0
+            "free_premium_used": row["free_premium_used"] or 0,
+            "paid_premium_count": row["paid_premium_count"] or 0
         }
 
 async def get_user_tariff(user_id: int) -> str:
-    """Возвращает текущий тариф пользователя"""
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT tariff, is_subscribed, sub_end_date FROM users WHERE user_id = $1",
@@ -276,18 +275,71 @@ async def get_user_download_limit(user_id: int) -> int:
     return tariff.get("daily_limit", 3)
 
 # ==========================================
+# 🎁 АКЦИЯ: КАЖДЫЙ 3-Й ПРЕМИУМ БЕСПЛАТНО
+# ==========================================
+
+async def get_paid_premium_count(user_id: int) -> int:
+    """
+    Возвращает количество ОПЛАЧЕННЫХ Премиум-подписок.
+    Реферальные НЕ считаются (free_premium_used = 0).
+    """
+    async with pool.acquire() as conn:
+        row = await conn.fetchval(
+            "SELECT paid_premium_count FROM users WHERE user_id = $1",
+            user_id
+        )
+        return row or 0
+
+async def increment_paid_premium_count(user_id: int):
+    """
+    Увеличивает счётчик оплаченных Премиум-подписок на 1.
+    """
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET paid_premium_count = paid_premium_count + 1 WHERE user_id = $1",
+            user_id
+        )
+
+async def is_free_premium_available(user_id: int) -> bool:
+    """
+    Проверяет, имеет ли пользователь право на бесплатный Премиум.
+    """
+    count = await get_paid_premium_count(user_id)
+    return count > 0 and count % 3 == 0
+
+async def mark_free_premium_used(user_id: int):
+    """
+    Отмечает, что пользователь получил бесплатный Премиум.
+    """
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET free_premium_used = 1 WHERE user_id = $1",
+            user_id
+        )
+
+async def activate_free_premium(user_id: int):
+    """
+    Активирует бесплатный Премиум на месяц.
+    """
+    now = datetime.now()
+    end_date = now + timedelta(days=SUB_DURATION_DAYS)
+    now_str = now.strftime("%Y-%m-%d %H:%M:%S")
+    end_date_str = end_date.strftime("%Y-%m-%d %H:%M:%S")
+    
+    async with pool.acquire() as conn:
+        await conn.execute(
+            "UPDATE users SET is_subscribed = 1, tariff = 'premium', sub_start_date = $1, sub_end_date = $2 WHERE user_id = $3",
+            now_str, end_date_str, user_id
+        )
+
+# ==========================================
 # 🔥 РЕФЕРАЛЬНАЯ СИСТЕМА
 # ==========================================
 
 async def generate_referral_link(user_id: int) -> str:
-    """Генерирует реферальную ссылку"""
     return f"https://t.me/{BOT_USERNAME}?start=ref_{user_id}"
 
 async def process_referral(new_user_id: int, referrer_id: int) -> str:
-    """
-    Обрабатывает переход по реферальной ссылке.
-    Возвращает сообщение о награде.
-    """
     if new_user_id == referrer_id:
         return "❌ Нельзя пригласить самого себя!"
     
@@ -343,7 +395,6 @@ async def process_referral(new_user_id: int, referrer_id: int) -> str:
         return "\n\n".join(messages)
 
 async def get_referral_info(user_id: int) -> dict:
-    """Возвращает информацию о рефералах пользователя"""
     async with pool.acquire() as conn:
         row = await conn.fetchrow(
             "SELECT referral_count, free_standard_used, free_premium_used FROM users WHERE user_id = $1",
@@ -358,6 +409,33 @@ async def get_referral_info(user_id: int) -> dict:
             "standard_used": row["free_standard_used"] == 1,
             "premium_used": row["free_premium_used"] == 1
         }
+
+# ==========================================
+# 🔔 ПРОВЕРКА ПОДПИСОК (ДЛЯ УВЕДОМЛЕНИЙ)
+# ==========================================
+
+async def get_expiring_subs(days_left: int = 3) -> list:
+    now = datetime.now()
+    target_date = (now + timedelta(days=days_left)).strftime("%Y-%m-%d %H:%M:%S")
+    
+    async with pool.acquire() as conn:
+        records = await conn.fetch(
+            "SELECT user_id, sub_end_date, tariff FROM users WHERE is_subscribed = 1 AND sub_end_date <= $1 AND sub_end_date > $2",
+            target_date, now.strftime("%Y-%m-%d %H:%M:%S")
+        )
+        return [{"user_id": r["user_id"], "sub_end_date": r["sub_end_date"], "tariff": r["tariff"]} for r in records]
+
+async def get_expired_today() -> list:
+    now = datetime.now()
+    today_start = now.strftime("%Y-%m-%d 00:00:00")
+    today_end = now.strftime("%Y-%m-%d 23:59:59")
+    
+    async with pool.acquire() as conn:
+        records = await conn.fetch(
+            "SELECT user_id, sub_end_date, tariff FROM users WHERE is_subscribed = 1 AND sub_end_date BETWEEN $1 AND $2",
+            today_start, today_end
+        )
+        return [{"user_id": r["user_id"], "sub_end_date": r["sub_end_date"], "tariff": r["tariff"]} for r in records]
 
 # ==========================================
 # АДМИН-ФУНКЦИИ
