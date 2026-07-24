@@ -17,7 +17,7 @@ from database import (
     get_user_stats, get_user_tariff, can_download,
     generate_referral_link, process_referral, get_referral_info
 )
-from downloader import download_media, detect_platform
+from downloader import download_media, detect_platform, extract_video_info
 
 # ==========================================
 # НАСТРОЙКА ЛОГИРОВАНИЯ
@@ -82,6 +82,36 @@ def get_user_stats_keyboard():
         [InlineKeyboardButton(text="🎁 Пригласить друга", callback_data="referral")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
+
+# ==========================================
+# 🔥 ФУНКЦИЯ ПОЛУЧЕНИЯ ИНФОРМАЦИИ О ВИДЕО
+# ==========================================
+async def get_video_info(url: str) -> dict:
+    """
+    Получает информацию о видео без скачивания.
+    Возвращает словарь с названием, длительностью, размером и платформой.
+    """
+    try:
+        info = await asyncio.to_thread(extract_video_info, url)
+        
+        if not info or info.get("extractor") == "unknown":
+            return None
+        
+        duration_sec = info.get("duration", 0)
+        estimated_size_mb = (duration_sec * 5) / 8  # 5 Мбит/с -> МБ
+        
+        return {
+            "title": info.get("title", "Неизвестно")[:50],
+            "duration": duration_sec,
+            "duration_str": f"{duration_sec // 60}:{duration_sec % 60:02d}",
+            "estimated_size_mb": round(estimated_size_mb, 1),
+            "platform": info.get("platform", "unknown"),
+            "thumbnail": info.get("thumbnail"),
+            "extractor": info.get("extractor", "unknown")
+        }
+    except Exception as e:
+        print(f"❌ Ошибка получения информации: {e}")
+        return None
 
 # ==========================================
 # 🚀 КОМАНДА /TARIFF
@@ -604,14 +634,58 @@ async def process_successful_payment(message: types.Message):
     )
 
 # ==========================================
-# 🚀 ОСНОВНОЙ ОБРАБОТЧИК ССЫЛОК
+# 🚀 ОСНОВНОЙ ОБРАБОТЧИК ССЫЛОК (С ПРЕДПРОСМОТРОМ)
 # ==========================================
 @dp.message(F.text.startswith(("http://", "https://")))
 async def handle_link(message: types.Message):
     user_id = message.from_user.id
+    url = message.text.strip()
+    
+    # Получаем информацию о видео
+    info_msg = await message.answer("🔍 *Получаю информацию о видео...*", parse_mode="Markdown")
+    video_info = await get_video_info(url)
+    
+    if not video_info:
+        await info_msg.edit_text(
+            "❌ **Не удалось получить информацию о видео.**\n\n"
+            "Проверь ссылку или попробуй другую.",
+            parse_mode="Markdown"
+        )
+        return
+    
+    size_mb = video_info["estimated_size_mb"]
+    is_large = size_mb > 200
+    
+    preview_text = (
+        "📹 **Информация о видео:**\n\n"
+        f"📌 **Название:** {video_info['title']}\n"
+        f"⏱️ **Длительность:** {video_info['duration_str']}\n"
+        f"📱 **Платформа:** {video_info['platform'].capitalize()}\n"
+        f"📦 **Примерный размер:** `{size_mb} МБ`\n"
+    )
+    
+    if is_large:
+        preview_text += (
+            f"\n⚠️ **ВНИМАНИЕ!**\n"
+            f"Видео весит **{size_mb} МБ**, что превышает лимит **200 МБ**.\n"
+            f"Бот пока не поддерживает скачивание таких больших файлов.\n\n"
+            f"💡 Попробуй видео поменьше или используй другой источник."
+        )
+        await info_msg.edit_text(preview_text, parse_mode="Markdown")
+        return
+    
+    preview_text += (
+        f"\n📌 **Лимит:** до 200 МБ\n"
+        f"✅ Видео подходит по размеру!\n\n"
+        f"🔄 Начинаю скачивание..."
+    )
+    
+    await info_msg.edit_text(preview_text, parse_mode="Markdown")
+    
+    # --- ДАЛЬШЕ СТАНДАРТНОЕ СКАЧИВАНИЕ ---
     await get_or_create_user(user_id)
     
-    platform = detect_platform(message.text)
+    platform = detect_platform(url)
     
     can_dl, error_msg = await can_download(user_id, platform)
     if not can_dl:
@@ -627,7 +701,7 @@ async def handle_link(message: types.Message):
     file_path = f"temp_{user_id}_{message.message_id}.mp4"
 
     try:
-        success = await download_media(message.text, file_path)
+        success = await download_media(url, file_path)
         if success:
             video_file = FSInputFile(file_path)
             await message.answer_video(
