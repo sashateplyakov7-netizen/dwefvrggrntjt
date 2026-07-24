@@ -30,26 +30,65 @@ async def init_db():
         )
         
         async with pool.acquire() as conn:
-            await conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    user_id BIGINT PRIMARY KEY,
-                    downloads_today INT DEFAULT 0,
-                    total_downloads INT DEFAULT 0,
-                    last_download_date VARCHAR(10),
-                    tariff VARCHAR(20) DEFAULT 'free',
-                    is_subscribed INT DEFAULT 0,
-                    sub_start_date VARCHAR(20),
-                    sub_end_date VARCHAR(20),
-                    created_at VARCHAR(20),
-                    last_activity VARCHAR(20),
-                    invited_by BIGINT DEFAULT 0,
-                    referral_count INT DEFAULT 0,
-                    free_standard_used INT DEFAULT 0,
-                    free_premium_used INT DEFAULT 0,
-                    pending_payment_label VARCHAR(100),
-                    pending_tariff VARCHAR(20)
-                );
+            # Проверяем, существует ли таблица
+            table_exists = await conn.fetchval("""
+                SELECT EXISTS (
+                    SELECT 1 FROM information_schema.tables 
+                    WHERE table_name = 'users'
+                )
             """)
+            
+            if not table_exists:
+                # Создаём таблицу с нуля
+                await conn.execute("""
+                    CREATE TABLE users (
+                        user_id BIGINT PRIMARY KEY,
+                        downloads_today INT DEFAULT 0,
+                        total_downloads INT DEFAULT 0,
+                        last_download_date VARCHAR(10),
+                        tariff VARCHAR(20) DEFAULT 'free',
+                        is_subscribed INT DEFAULT 0,
+                        sub_start_date VARCHAR(20),
+                        sub_end_date VARCHAR(20),
+                        created_at VARCHAR(20),
+                        last_activity VARCHAR(20),
+                        invited_by BIGINT DEFAULT 0,
+                        referral_count INT DEFAULT 0,
+                        free_standard_used INT DEFAULT 0,
+                        free_premium_used INT DEFAULT 0,
+                        pending_payment_label VARCHAR(100),
+                        pending_tariff VARCHAR(20)
+                    );
+                """)
+                print("✅ Таблица users создана!", flush=True)
+            else:
+                # Проверяем наличие всех колонок и добавляем недостающие
+                columns = await conn.fetch("""
+                    SELECT column_name 
+                    FROM information_schema.columns 
+                    WHERE table_name = 'users'
+                """)
+                existing_columns = [col['column_name'] for col in columns]
+                
+                # Список всех необходимых колонок
+                required_columns = {
+                    'total_downloads': 'INT DEFAULT 0',
+                    'tariff': "VARCHAR(20) DEFAULT 'free'",
+                    'invited_by': 'BIGINT DEFAULT 0',
+                    'referral_count': 'INT DEFAULT 0',
+                    'free_standard_used': 'INT DEFAULT 0',
+                    'free_premium_used': 'INT DEFAULT 0',
+                    'pending_payment_label': 'VARCHAR(100)',
+                    'pending_tariff': 'VARCHAR(20)'
+                }
+                
+                for col_name, col_type in required_columns.items():
+                    if col_name not in existing_columns:
+                        await conn.execute(f"""
+                            ALTER TABLE users ADD COLUMN {col_name} {col_type}
+                        """)
+                        print(f"✅ Добавлена колонка {col_name}", flush=True)
+        
         print("✅ База данных успешно подключена и таблицы созданы!", flush=True)
         
     except Exception as e:
@@ -139,6 +178,7 @@ async def get_or_create_user(user_id: int):
             "free_premium_used": free_premium_used
         }
 
+# ... ВСЁ ОСТАЛЬНОЕ БЕЗ ИЗМЕНЕНИЙ (функции остаются те же)
 async def increment_downloads(user_id: int):
     today = datetime.now().strftime("%Y-%m-%d")
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
