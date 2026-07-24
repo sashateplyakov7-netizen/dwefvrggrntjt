@@ -83,9 +83,45 @@ USER_AGENTS = [
 # ОПРЕДЕЛЕНИЕ ПЛАТФОРМЫ ПО ССЫЛКЕ
 # ==========================================
 def detect_platform(url: str) -> str:
+    url_lower = url.lower()
     for platform in SUPPORTED_PLATFORMS:
-        if platform in url.lower():
+        if platform in url_lower:
             return platform
+    
+    # 🔥 ЕСЛИ НЕ НАШЛИ — ПЫТАЕМСЯ ПО ДОМЕНУ
+    try:
+        from urllib.parse import urlparse
+        domain = urlparse(url).netloc.lower()
+        
+        domain_map = {
+            "tiktok.com": "tiktok.com",
+            "instagram.com": "instagram.com",
+            "youtube.com": "youtube.com",
+            "youtu.be": "youtu.be",
+            "pinterest.com": "pinterest.com",
+            "twitter.com": "twitter.com",
+            "x.com": "x.com",
+            "facebook.com": "facebook.com",
+            "reddit.com": "reddit.com",
+            "vimeo.com": "vimeo.com",
+            "t.me": "t.me",
+            "vk.com": "vk.com",
+            "vkontakte.ru": "vkontakte.ru",
+            "likee.com": "likee.com",
+            "rutube.ru": "rutube.ru",
+            "twitch.tv": "twitch.tv",
+            "coub.com": "coub.com",
+            "tumblr.com": "tumblr.com",
+            "dailymotion.com": "dailymotion.com",
+            "9gag.com": "9gag.com",
+        }
+        
+        for key, value in domain_map.items():
+            if key in domain:
+                return value
+    except:
+        pass
+    
     return "unknown"
 
 # ==========================================
@@ -226,10 +262,6 @@ def fallback_tiktok(url: str, output_path: str) -> bool:
                 urllib.request.urlretrieve(video_url, output_path)
                 return os.path.exists(output_path)
         
-        # Пробуем через SnapTik
-        print("🔄 Пробуем SnapTik...", flush=True)
-        # Здесь можно добавить парсинг SnapTik
-        
         return False
     except Exception as e:
         print(f"❌ TikTok fallback не сработал: {e}", flush=True)
@@ -241,12 +273,10 @@ def fallback_instagram(url: str, output_path: str) -> bool:
         import requests
         print("🔄 Instagram fallback...", flush=True)
         
-        # Пробуем через публичный API
         headers = {'User-Agent': random.choice(USER_AGENTS)}
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
-            # Ищем видео в HTML
             match = re.search(r'"video_url":"([^"]+)"', response.text)
             if match:
                 video_url = match.group(1).replace('\\', '')
@@ -269,7 +299,6 @@ def fallback_facebook(url: str, output_path: str) -> bool:
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
-            # Ищем видео в HTML
             match = re.search(r'"playable_url":"([^"]+)"', response.text)
             if match:
                 video_url = match.group(1).replace('\\', '')
@@ -288,12 +317,10 @@ def fallback_twitter(url: str, output_path: str) -> bool:
         import requests
         print("🔄 Twitter fallback...", flush=True)
         
-        # Пробуем через API
         api_url = f"https://twitsave.com/info?url={url}"
         response = requests.get(api_url, timeout=15)
         
         if response.status_code == 200:
-            # Парсим HTML
             match = re.search(r'href="([^"]+)"[^>]*download', response.text)
             if match:
                 video_url = match.group(1)
@@ -312,14 +339,12 @@ def fallback_reddit(url: str, output_path: str) -> bool:
         import requests
         print("🔄 Reddit fallback...", flush=True)
         
-        # Добавляем .json
         json_url = url + ".json" if not url.endswith('.json') else url
         headers = {'User-Agent': 'Mozilla/5.0'}
         response = requests.get(json_url, headers=headers, timeout=15)
         
         if response.status_code == 200:
             data = response.json()
-            # Ищем видео в JSON
             if isinstance(data, list) and len(data) > 0:
                 post = data[0].get('data', {}).get('children', [{}])[0].get('data', {})
                 video_url = post.get('secure_media', {}).get('reddit_video', {}).get('fallback_url')
@@ -345,7 +370,6 @@ def fallback_pinterest(url: str, output_path: str) -> bool:
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
-            # Ищем видео
             video_tags = soup.find_all('video')
             for video in video_tags:
                 src = video.get('src')
@@ -365,7 +389,6 @@ def fallback_vimeo(url: str, output_path: str) -> bool:
         import requests
         print("🔄 Vimeo fallback...", flush=True)
         
-        # Пробуем через API
         match = re.search(r'/(\d+)', url)
         if match:
             video_id = match.group(1)
@@ -390,7 +413,6 @@ def fallback_twitch(url: str, output_path: str) -> bool:
     """Обходной путь для Twitch"""
     try:
         print("🔄 Twitch fallback...", flush=True)
-        # Twitch требует специальных заголовков
         ydl_opts = {
             'format': 'best[ext=mp4]/best',
             'outtmpl': output_path,
@@ -416,7 +438,6 @@ def fallback_vk(url: str, output_path: str) -> bool:
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
-            # Ищем видео в HTML
             match = re.search(r'"url":"([^"]+)"', response.text)
             if match:
                 video_url = match.group(1).replace('\\', '')
@@ -436,7 +457,6 @@ def fallback_rutube(url: str, output_path: str) -> bool:
         import requests
         print("🔄 Rutube fallback...", flush=True)
         
-        # Пробуем через API
         match = re.search(r'/video/(\d+)', url)
         if match:
             video_id = match.group(1)
@@ -462,7 +482,6 @@ def fallback_dailymotion(url: str, output_path: str) -> bool:
         import requests
         print("🔄 Dailymotion fallback...", flush=True)
         
-        # Пробуем через API
         match = re.search(r'/video/([^_]+)', url)
         if match:
             video_id = match.group(1)
@@ -492,7 +511,6 @@ def fallback_9gag(url: str, output_path: str) -> bool:
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
-            # Ищем видео в HTML
             match = re.search(r'"video":"([^"]+)"', response.text)
             if match:
                 video_url = match.group(1).replace('\\', '')
@@ -515,7 +533,6 @@ def fallback_telegram(url: str, output_path: str) -> bool:
         response = requests.get(url, headers=headers, timeout=15)
         
         if response.status_code == 200:
-            # Ищем ссылки на видео
             match = re.search(r'href="([^"]+\.mp4)"', response.text)
             if match:
                 video_url = match.group(1)
@@ -748,6 +765,13 @@ def extract_video_info(url: str) -> dict:
             if not info:
                 return get_empty_info(url)
             
+            # 🔥 ОПРЕДЕЛЯЕМ ПЛАТФОРМУ
+            platform = detect_platform(url)
+            
+            # 🔥 ДЛЯ YOUTUBE ПРОВЕРЯЕМ extractor
+            if info.get('extractor') == 'youtube' or 'youtube.com' in url or 'youtu.be' in url:
+                platform = 'youtube.com'
+            
             return {
                 "title": info.get('title', info.get('fulltitle', 'Неизвестно'))[:50],
                 "duration": info.get('duration', 0),
@@ -755,7 +779,7 @@ def extract_video_info(url: str) -> dict:
                 "likes": info.get('like_count', 0),
                 "uploader": info.get('uploader', info.get('channel', 'Неизвестно')),
                 "thumbnail": info.get('thumbnail', None),
-                "platform": detect_platform(url),
+                "platform": platform,
                 "extractor": info.get('extractor', 'unknown')
             }
     except Exception as e:
@@ -775,7 +799,7 @@ def get_empty_info(url: str) -> dict:
     }
 
 # ==========================================
-# ОСТАЛЬНЫЕ ФУНКЦИИ (БЕЗ ИЗМЕНЕНИЙ)
+# ОСТАЛЬНЫЕ ФУНКЦИИ
 # ==========================================
 async def download_media_with_progress(url: str, output_path: str, progress_callback, quality: str = "best") -> bool:
     def _sync_with_progress():
