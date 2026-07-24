@@ -2,6 +2,26 @@ import asyncio
 import os
 import random
 import yt_dlp
+from aiohttp import web
+
+# ==========================================
+# ВЕБ-СЕРВЕР ДЛЯ RENDER (чтобы не падал по порту)
+# ==========================================
+async def handle(request):
+    return web.Response(text="Bot is running!")
+
+async def start_web_server():
+    app = web.Application()
+    app.router.add_get("/", handle)
+    app.router.add_head("/", handle)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    port = int(os.environ.get("PORT", 8080))
+    site = web.TCPSite(runner, "0.0.0.0", port)
+    await site.start()
+    print(f"🌐 Веб-сервер успешно запущен на порту {port}")
 
 # ==========================================
 # НАСТРОЙКИ (перенесены из config)
