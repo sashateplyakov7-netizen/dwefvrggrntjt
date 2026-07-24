@@ -51,9 +51,10 @@ class DownloadState(StatesGroup):
     waiting_for_cut_end = State()
 
 # ==========================================
-# КЭШ ДЛЯ URL
+# КЭШ ДЛЯ URL И ВИДЕО
 # ==========================================
 download_cache = {}
+video_cache = {}  # 🔥 КЭШ ДЛЯ ИНФОРМАЦИИ О ВИДЕО
 
 # ==========================================
 # КЛАВИАТУРЫ
@@ -145,11 +146,31 @@ def get_quality_keyboard(qualities: list, url: str, is_premium: bool = False):
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 # ==========================================
-# ПОЛУЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО
+# 🔥 ПОЛУЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО (УСКОРЕННОЕ С КЭШЕМ)
 # ==========================================
 async def get_video_info(url: str) -> dict:
+    global video_cache
+    
+    # 🔥 ПРОВЕРЯЕМ КЭШ
+    if url in video_cache:
+        print(f"📦 Информация из кэша: {url[:50]}...")
+        return video_cache[url]
+    
     try:
-        info = await asyncio.to_thread(extract_video_info, url)
+        # 🔥 БЫСТРОЕ ОПРЕДЕЛЕНИЕ ПЛАТФОРМЫ
+        platform = detect_platform(url)
+        if platform == "unknown":
+            return None
+        
+        # 🔥 ПЫТАЕМСЯ ПОЛУЧИТЬ ИНФОРМАЦИЮ С ТАЙМАУТОМ 10 СЕКУНД
+        try:
+            info = await asyncio.wait_for(
+                asyncio.to_thread(extract_video_info, url),
+                timeout=10
+            )
+        except asyncio.TimeoutError:
+            print(f"⏰ Таймаут получения информации для {url[:50]}...")
+            info = None
         
         if info and info.get("extractor") != "unknown":
             duration_sec = info.get("duration", 0)
@@ -160,56 +181,58 @@ async def get_video_info(url: str) -> dict:
                 "fullhd": round((duration_sec * 10) / 8, 1)
             }
             
-            return {
+            result = {
                 "title": info.get("title", "Неизвестно")[:50],
                 "duration": duration_sec,
                 "duration_str": f"{duration_sec // 60}:{duration_sec % 60:02d}",
                 "estimated_size_mb": estimated_size_mb,
-                "platform": info.get("platform", "unknown"),
+                "platform": platform,
                 "thumbnail": info.get("thumbnail"),
                 "extractor": info.get("extractor", "unknown")
             }
-        
-        # Обходной путь
-        platform = detect_platform(url)
-        
-        if "youtube.com" in url or "youtu.be" in url:
-            match = re.search(r"(?:v=|/)([a-zA-Z0-9_-]{11})", url)
-            title = f"YouTube видео {match.group(1)}" if match else "YouTube видео"
-        elif "tiktok.com" in url:
-            match = re.search(r"/video/(\d+)", url)
-            title = f"TikTok видео {match.group(1)}" if match else "TikTok видео"
-        elif "instagram.com" in url:
-            match = re.search(r"/reel/([^/?]+)", url)
-            title = f"Instagram Reel {match.group(1)}" if match else "Instagram видео"
-        elif "pinterest.com" in url:
-            title = "Pinterest видео"
-        elif "twitter.com" in url or "x.com" in url:
-            title = "Twitter/X видео"
-        elif "facebook.com" in url:
-            title = "Facebook видео"
         else:
+            # 🔥 БЫСТРЫЙ ОБХОДНОЙ ПУТЬ
+            duration_sec = 60
+            estimated_size_mb = {
+                "sd": round((duration_sec * 2) / 8, 1),
+                "hd": round((duration_sec * 5) / 8, 1),
+                "fullhd": round((duration_sec * 10) / 8, 1)
+            }
+            
+            # Извлекаем название из URL
             title = "Видео"
+            if "youtube.com" in url or "youtu.be" in url:
+                match = re.search(r"(?:v=|/)([a-zA-Z0-9_-]{11})", url)
+                title = f"YouTube видео {match.group(1)}" if match else "YouTube видео"
+            elif "tiktok.com" in url:
+                match = re.search(r"/video/(\d+)", url)
+                title = f"TikTok видео {match.group(1)}" if match else "TikTok видео"
+            elif "instagram.com" in url:
+                match = re.search(r"/reel/([^/?]+)", url)
+                title = f"Instagram Reel {match.group(1)}" if match else "Instagram видео"
+            elif "pinterest.com" in url:
+                title = "Pinterest видео"
+            elif "twitter.com" in url or "x.com" in url:
+                title = "Twitter/X видео"
+            elif "facebook.com" in url:
+                title = "Facebook видео"
+            
+            result = {
+                "title": title[:50],
+                "duration": duration_sec,
+                "duration_str": f"{duration_sec // 60}:{duration_sec % 60:02d}",
+                "estimated_size_mb": estimated_size_mb,
+                "platform": platform,
+                "thumbnail": None,
+                "extractor": "fallback"
+            }
         
-        duration_sec = 60
-        estimated_size_mb = {
-            "sd": round((duration_sec * 2) / 8, 1),
-            "hd": round((duration_sec * 5) / 8, 1),
-            "fullhd": round((duration_sec * 10) / 8, 1)
-        }
-        
-        return {
-            "title": title[:50],
-            "duration": duration_sec,
-            "duration_str": f"{duration_sec // 60}:{duration_sec % 60:02d}",
-            "estimated_size_mb": estimated_size_mb,
-            "platform": platform,
-            "thumbnail": None,
-            "extractor": "fallback"
-        }
+        # 🔥 СОХРАНЯЕМ В КЭШ
+        video_cache[url] = result
+        return result
         
     except Exception as e:
-        print(f"Ошибка получения информации: {e}")
+        print(f"❌ Ошибка получения информации: {e}")
         return None
 
 # ==========================================
@@ -561,7 +584,6 @@ async def process_admin_callbacks(callback: types.CallbackQuery, state: FSMConte
     elif action == "users":
         users = await get_all_users()
         text = f"👥 **Все пользователи**\n\nВсего: {len(users)}\n\n"
-        # Показываем первых 20
         for i, uid in enumerate(users[:20], 1):
             text += f"{i}. `{uid}`\n"
         if len(users) > 20:
@@ -874,7 +896,7 @@ async def process_successful_payment(message: types.Message):
         )
 
 # ==========================================
-# ОСНОВНОЙ ОБРАБОТЧИК ССЫЛОК
+# ОСНОВНОЙ ОБРАБОТЧИК ССЫЛОК (УСКОРЕННЫЙ)
 # ==========================================
 
 @dp.message(F.text.startswith(("http://", "https://")))
@@ -887,6 +909,8 @@ async def handle_link(message: types.Message):
         return
     
     info_msg = await message.answer("🔍 Получаю информацию о видео...", parse_mode="Markdown")
+    
+    # 🔥 БЫСТРОЕ ПОЛУЧЕНИЕ ИНФОРМАЦИИ С КЭШЕМ
     video_info = await get_video_info(url)
     
     if not video_info or video_info.get("platform") == "unknown":
@@ -1167,7 +1191,6 @@ async def process_cut_end(message: types.Message, state: FSMContext):
     file_path = f"temp_{message.from_user.id}_{int(datetime.now().timestamp())}.mp4"
     
     try:
-        # Используем функцию обрезки из downloader
         from downloader import download_media_with_cut
         success = await download_media_with_cut(url, file_path, start_time, end_time)
         
