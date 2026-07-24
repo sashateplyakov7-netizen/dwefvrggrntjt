@@ -59,7 +59,7 @@ def get_tariff_keyboard():
             InlineKeyboardButton(text="📱 Бесплатный — 0 ₽", callback_data="tariff_free"),
             InlineKeyboardButton(text="⚡ Стандарт — 100 ₽", callback_data="tariff_standard")
         ],
-        [InlineKeyboardButton(text="💎 Премиум — 200 ₽", callback_data="tariff_premium")],
+        [InlineKeyboardButton(text="💎 Премиум — 300 ₽", callback_data="tariff_premium")],
         [InlineKeyboardButton(text="🏠 Назад", callback_data="main_menu")]
     ])
 
@@ -98,10 +98,14 @@ async def cmd_tariff(message: types.Message):
         "   • 30 скачиваний в день\n"
         "   • Все основные платформы\n"
         "   • Качество: высокое\n\n"
-        "💎 **Премиум** — 200 ₽/мес\n"
+        "💎 **Премиум** — 300 ₽/мес\n"
         "   • Безлимит скачиваний\n"
         "   • Все платформы\n"
-        "   • Максимальное качество",
+        "   • Максимальное качество\n"
+        "   • Поддержка видео до 2 ГБ\n"
+        "   • Умный кэш (мгновенная выдача)\n"
+        "   • AI-описание и хештеги\n"
+        "   • Расшифровка аудио в текст",
         parse_mode="Markdown",
         reply_markup=get_tariff_keyboard()
     )
@@ -147,6 +151,7 @@ async def cmd_help(message: types.Message):
         "/start — Главное меню\n"
         "/tariff — Выбрать тариф\n"
         "/stats — Моя статистика\n"
+        "/referral — Пригласить друга\n"
         "/admin — Панель управления (админ)\n"
         "/help — Эта справка\n\n"
         "🔗 Просто отправь ссылку на видео — я скачаю его!\n\n"
@@ -166,6 +171,36 @@ async def cmd_help(message: types.Message):
     )
 
 # ==========================================
+# 🔥 КОМАНДА /REFERRAL
+# ==========================================
+@dp.message(Command("referral"))
+async def cmd_referral(message: types.Message):
+    user_id = message.from_user.id
+    link = await generate_referral_link(user_id)
+    referral_info = await get_referral_info(user_id)
+    
+    next_reward = ""
+    if referral_info["count"] < 1:
+        next_reward = "🎯 Пригласи 1 друга → Стандарт на месяц"
+    elif referral_info["count"] < 3:
+        next_reward = "🎯 Пригласи ещё 3 друзей → Премиум на месяц"
+    else:
+        next_reward = "🏆 Ты уже получил все награды!"
+    
+    await message.answer(
+        "🎁 **Реферальная программа**\n\n"
+        "Отправь другу эту ссылку:\n"
+        f"`{link}`\n\n"
+        "📊 **Твоя статистика:**\n"
+        f"• Приглашено: {referral_info['count']} друзей\n"
+        f"• Стандарт: {'✅ Получен' if referral_info['standard_used'] else '❌ Не получен'}\n"
+        f"• Премиум: {'✅ Получен' if referral_info['premium_used'] else '❌ Не получен'}\n\n"
+        f"{next_reward}\n\n"
+        "💡 Нажми на ссылку, чтобы скопировать!",
+        parse_mode="Markdown"
+    )
+
+# ==========================================
 # 🔥 КОМАНДА /START (С РЕФЕРАЛЬНОЙ ССЫЛКОЙ)
 # ==========================================
 @dp.message(CommandStart())
@@ -179,7 +214,8 @@ async def start_cmd(message: types.Message):
             referrer_id = int(args[1].replace("ref_", ""))
             if referrer_id != user_id:
                 result = await process_referral(user_id, referrer_id)
-                await message.answer(result, parse_mode="Markdown")
+                if result:
+                    await message.answer(result, parse_mode="Markdown")
             else:
                 await message.answer("❌ Нельзя пригласить самого себя!")
         except ValueError:
@@ -277,7 +313,7 @@ async def show_tariffs(callback: types.CallbackQuery):
         "   • 30 скачиваний в день\n"
         "   • Все основные платформы\n"
         "   • Качество: высокое\n\n"
-        "💎 **Премиум** — 200 ₽/мес\n"
+        "💎 **Премиум** — 300 ₽/мес\n"
         "   • Безлимит скачиваний\n"
         "   • Все платформы\n"
         "   • Максимальное качество",
