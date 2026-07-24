@@ -184,8 +184,8 @@ def universal_fallback(url: str, output_path: str) -> bool:
             'prefer_insecure': True,
             'user_agent': random.choice(USER_AGENTS),
             'extract_flat': False,
-            'socket_timeout': 30,
-            'retries': 10,
+            'socket_timeout': 20,
+            'retries': 3,
         }
         
         # Пробуем через стандартный yt-dlp
@@ -200,7 +200,7 @@ def universal_fallback(url: str, output_path: str) -> bool:
         import requests
         print("🔄 Пробуем прямой запрос...", flush=True)
         headers = {'User-Agent': random.choice(USER_AGENTS)}
-        response = requests.get(url, headers=headers, timeout=30, stream=True)
+        response = requests.get(url, headers=headers, timeout=20, stream=True)
         
         if response.status_code == 200:
             content_type = response.headers.get('content-type', '')
@@ -251,6 +251,8 @@ def fallback_youtube(url: str, output_path: str) -> bool:
                     'no_check_certificate': True,
                     'prefer_insecure': True,
                     'user_agent': random.choice(USER_AGENTS),
+                    'socket_timeout': 20,
+                    'retries': 3,
                 }
                 
                 if COOKIES_FILE:
@@ -277,7 +279,7 @@ def fallback_tiktok(url: str, output_path: str) -> bool:
         
         # Пробуем через TikWM API
         api_url = f"https://www.tikwm.com/api/?url={url}"
-        response = requests.get(api_url, timeout=15)
+        response = requests.get(api_url, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
@@ -299,7 +301,7 @@ def fallback_instagram(url: str, output_path: str) -> bool:
         print("🔄 Instagram fallback...", flush=True)
         
         headers = {'User-Agent': random.choice(USER_AGENTS)}
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=10)
         
         if response.status_code == 200:
             match = re.search(r'"video_url":"([^"]+)"', response.text)
@@ -321,7 +323,7 @@ def fallback_facebook(url: str, output_path: str) -> bool:
         print("🔄 Facebook fallback...", flush=True)
         
         headers = {'User-Agent': random.choice(USER_AGENTS)}
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=10)
         
         if response.status_code == 200:
             match = re.search(r'"playable_url":"([^"]+)"', response.text)
@@ -343,7 +345,7 @@ def fallback_twitter(url: str, output_path: str) -> bool:
         print("🔄 Twitter fallback...", flush=True)
         
         api_url = f"https://twitsave.com/info?url={url}"
-        response = requests.get(api_url, timeout=15)
+        response = requests.get(api_url, timeout=10)
         
         if response.status_code == 200:
             match = re.search(r'href="([^"]+)"[^>]*download', response.text)
@@ -366,7 +368,7 @@ def fallback_reddit(url: str, output_path: str) -> bool:
         
         json_url = url + ".json" if not url.endswith('.json') else url
         headers = {'User-Agent': 'Mozilla/5.0'}
-        response = requests.get(json_url, headers=headers, timeout=15)
+        response = requests.get(json_url, headers=headers, timeout=10)
         
         if response.status_code == 200:
             data = response.json()
@@ -391,7 +393,7 @@ def fallback_pinterest(url: str, output_path: str) -> bool:
         print("🔄 Pinterest fallback...", flush=True)
         
         headers = {'User-Agent': random.choice(USER_AGENTS)}
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=10)
         
         if response.status_code == 200:
             soup = BeautifulSoup(response.text, 'html.parser')
@@ -418,7 +420,7 @@ def fallback_vimeo(url: str, output_path: str) -> bool:
         if match:
             video_id = match.group(1)
             api_url = f"https://vimeo.com/api/v2/video/{video_id}.json"
-            response = requests.get(api_url, timeout=15)
+            response = requests.get(api_url, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
@@ -445,6 +447,8 @@ def fallback_twitch(url: str, output_path: str) -> bool:
             'no_warnings': True,
             'noplaylist': True,
             'user_agent': random.choice(USER_AGENTS),
+            'socket_timeout': 20,
+            'retries': 3,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
@@ -460,7 +464,7 @@ def fallback_vk(url: str, output_path: str) -> bool:
         print("🔄 VK fallback...", flush=True)
         
         headers = {'User-Agent': random.choice(USER_AGENTS)}
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=10)
         
         if response.status_code == 200:
             match = re.search(r'"url":"([^"]+)"', response.text)
@@ -486,7 +490,7 @@ def fallback_rutube(url: str, output_path: str) -> bool:
         if match:
             video_id = match.group(1)
             api_url = f"https://rutube.ru/api/play/video/{video_id}/"
-            response = requests.get(api_url, timeout=15)
+            response = requests.get(api_url, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
@@ -511,7 +515,7 @@ def fallback_dailymotion(url: str, output_path: str) -> bool:
         if match:
             video_id = match.group(1)
             api_url = f"https://www.dailymotion.com/video/{video_id}"
-            response = requests.get(api_url, timeout=15)
+            response = requests.get(api_url, timeout=10)
             
             if response.status_code == 200:
                 match = re.search(r'"video_url":"([^"]+)"', response.text)
@@ -533,7 +537,7 @@ def fallback_9gag(url: str, output_path: str) -> bool:
         print("🔄 9GAG fallback...", flush=True)
         
         headers = {'User-Agent': random.choice(USER_AGENTS)}
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=10)
         
         if response.status_code == 200:
             match = re.search(r'"video":"([^"]+)"', response.text)
@@ -555,7 +559,7 @@ def fallback_telegram(url: str, output_path: str) -> bool:
         print("🔄 Telegram fallback...", flush=True)
         
         headers = {'User-Agent': random.choice(USER_AGENTS)}
-        response = requests.get(url, headers=headers, timeout=15)
+        response = requests.get(url, headers=headers, timeout=10)
         
         if response.status_code == 200:
             match = re.search(r'href="([^"]+\.mp4)"', response.text)
@@ -573,7 +577,7 @@ def fallback_telegram(url: str, output_path: str) -> bool:
         return False
 
 # ==========================================
-# ОСНОВНАЯ ФУНКЦИЯ ЗАГРУЗКИ
+# ОСНОВНАЯ ФУНКЦИЯ ЗАГРУЗКИ (УСКОРЕННАЯ)
 # ==========================================
 def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
     platform = detect_platform(url)
@@ -587,25 +591,28 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
     
     format_str = get_format_for_quality(quality)
     
+    # 🔥 УСКОРЕННЫЕ НАСТРОЙКИ
     ydl_opts = {
         'format': format_str,
         'outtmpl': output_path,
         'quiet': True,
         'no_warnings': True,
         'noplaylist': True,
-        'max_filesize': MAX_FILE_SIZE,
-        'concurrent_fragment_downloads': 5,
-        'socket_timeout': 30,
-        'retries': 15,
-        'fragment_retries': 15,
+        'max_filesize': 200 * 1024 * 1024,  # 200 МБ
+        'concurrent_fragment_downloads': 10,  # 🔥 БЫЛО 5 → СТАЛО 10
+        'socket_timeout': 15,                # 🔥 БЫЛО 30 → СТАЛО 15
+        'retries': 3,                        # 🔥 БЫЛО 15 → СТАЛО 3
+        'fragment_retries': 3,               # 🔥 БЫЛО 15 → СТАЛО 3
         'skip_unavailable_fragments': True,
         'ignoreerrors': True,
         'extract_flat': False,
         'prefer_ffmpeg': True,
         'ffmpeg_location': '/usr/bin/ffmpeg' if os.name != 'nt' else None,
-        'sleep_interval': 1,
-        'max_sleep_interval': 5,
+        'sleep_interval': 0.5,               # 🔥 БЫЛО 1 → СТАЛО 0.5
+        'max_sleep_interval': 2,             # 🔥 БЫЛО 5 → СТАЛО 2
         'user_agent': random.choice(USER_AGENTS),
+        'external_downloader': 'aria2c',     # 🔥 МНОГОПОТОЧНЫЙ СКАЧИВАТЕЛЬ
+        'external_downloader_args': ['-x', '16', '-s', '16', '-k', '1M'],  # 🔥 16 ПОТОКОВ
     }
     
     if is_shorts:
@@ -662,7 +669,7 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
             break
     
     # ==========================================
-    # 🔥 5 ПОПЫТОК СКАЧИВАНИЯ
+    # 🔥 5 ПОПЫТОК СКАЧИВАНИЯ (УСКОРЕННЫЕ)
     # ==========================================
     
     # 1️⃣ СТАНДАРТНАЯ
@@ -769,9 +776,9 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
                 'preferredcodec': 'mp3',
                 'preferredquality': '192',
             }],
-            'socket_timeout': 30,
-            'retries': 10,
-            'fragment_retries': 10,
+            'socket_timeout': 15,
+            'retries': 3,
+            'fragment_retries': 3,
             'user_agent': random.choice(USER_AGENTS),
         }
         
@@ -797,8 +804,8 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'socket_timeout': 30,
-            'retries': 10,
+            'socket_timeout': 15,
+            'retries': 3,
             'user_agent': random.choice(USER_AGENTS),
         }
         
@@ -815,7 +822,7 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
             try:
                 import subprocess
                 subprocess.run(['ffmpeg', '-i', m4a_path, '-acodec', 'libmp3lame', '-ab', '192k', output_path], 
-                             capture_output=True, timeout=60)
+                             capture_output=True, timeout=30)
                 if os.path.exists(output_path):
                     os.remove(m4a_path)
                     print(f"✅ Аудио сконвертировано в MP3: {output_path}", flush=True)
@@ -838,8 +845,8 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
                     'quiet': True,
                     'no_warnings': True,
                     'noplaylist': True,
-                    'socket_timeout': 30,
-                    'retries': 10,
+                    'socket_timeout': 15,
+                    'retries': 3,
                     'user_agent': random.choice(USER_AGENTS),
                 }
                 if COOKIES_FILE:
@@ -861,17 +868,16 @@ def _sync_download_audio(url: str, output_path: str) -> bool:
 
 async def download_audio(url: str, output_path: str) -> bool:
     """
-    Асинхронная загрузка аудио с таймаутом 120 секунд.
+    Асинхронная загрузка аудио с таймаутом 60 секунд.
     """
     print(f"🎵 download_audio: {url}")
     try:
-        # Добавляем таймаут 120 секунд
         return await asyncio.wait_for(
             asyncio.to_thread(_sync_download_audio, url, output_path),
-            timeout=120
+            timeout=60
         )
     except asyncio.TimeoutError:
-        print(f"❌ Таймаут скачивания аудио (120 сек)", flush=True)
+        print(f"❌ Таймаут скачивания аудио (60 сек)", flush=True)
         return False
 
 # ==========================================
@@ -895,6 +901,9 @@ def _sync_download_with_cut(url: str, output_path: str, start_time: str = None, 
             'noplaylist': True,
             'ignoreerrors': True,
             'user_agent': random.choice(USER_AGENTS),
+            'socket_timeout': 15,
+            'retries': 3,
+            'concurrent_fragment_downloads': 10,
         }
         
         if "youtube.com" in url or "youtu.be" in url:
@@ -921,7 +930,7 @@ def _sync_download_with_cut(url: str, output_path: str, start_time: str = None, 
         
         cmd.extend(['-c', 'copy', '-avoid_negative_ts', '1', output_path])
         
-        result = subprocess.run(cmd, capture_output=True, text=True)
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
         
         if os.path.exists(temp_path):
             os.remove(temp_path)
@@ -943,7 +952,7 @@ async def download_media_with_cut(url: str, output_path: str, start_time: str = 
     return await asyncio.to_thread(_sync_download_with_cut, url, output_path, start_time, end_time)
 
 # ==========================================
-# ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО
+# ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО (УСКОРЕННОЕ)
 # ==========================================
 def extract_video_info(url: str) -> dict:
     is_shorts = "shorts/" in url or "/shorts/" in url
@@ -951,14 +960,16 @@ def extract_video_info(url: str) -> dict:
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        'extract_flat': not is_shorts,
+        'extract_flat': True,  # 🔥 БЫСТРО
         'user_agent': random.choice(USER_AGENTS),
         'http_headers': {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
             'Accept-Language': 'en-US,en;q=0.9',
             'Connection': 'keep-alive',
-        }
+        },
+        'socket_timeout': 10,  # 🔥 БЫЛО 30 → СТАЛО 10
+        'retries': 2,          # 🔥 МЕНЬШЕ ПОПЫТОК
     }
     
     if is_shorts:
@@ -1059,11 +1070,11 @@ async def download_media_with_progress(url: str, output_path: str, progress_call
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'max_filesize': MAX_FILE_SIZE,
-            'concurrent_fragment_downloads': 5,
+            'max_filesize': 200 * 1024 * 1024,
+            'concurrent_fragment_downloads': 10,
             'socket_timeout': 10,
-            'retries': 10,
-            'fragment_retries': 10,
+            'retries': 3,
+            'fragment_retries': 3,
             'user_agent': random.choice(USER_AGENTS),
             'progress_hooks': [lambda d: progress_callback(
                 percent=d.get('_percent_str', '0%').strip(),
@@ -1103,12 +1114,12 @@ async def download_media_rotating(url: str, output_path: str, quality: str = "be
             'quiet': True,
             'no_warnings': True,
             'noplaylist': True,
-            'max_filesize': MAX_FILE_SIZE,
-            'concurrent_fragment_downloads': 5,
+            'max_filesize': 200 * 1024 * 1024,
+            'concurrent_fragment_downloads': 10,
             'socket_timeout': 10,
             'user_agent': ua,
-            'retries': 15,
-            'fragment_retries': 15,
+            'retries': 3,
+            'fragment_retries': 3,
         }
         if "youtube.com" in url or "youtu.be" in url:
             if COOKIES_FILE:
