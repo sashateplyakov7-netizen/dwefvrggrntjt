@@ -15,7 +15,11 @@ from database import (
     init_db, get_or_create_user, increment_downloads, activate_subscription,
     get_admin_stats, grant_sub_by_admin, revoke_sub_by_admin, get_all_users,
     get_user_stats, get_user_tariff, can_download,
-    generate_referral_link, process_referral, get_referral_info
+    generate_referral_link, process_referral, get_referral_info,
+    # 🔥 НОВЫЕ ИМПОРТЫ ДЛЯ АКЦИИ
+    get_paid_premium_count, is_free_premium_available,
+    mark_free_premium_used, activate_free_premium,
+    get_expiring_subs, get_expired_today
 )
 from downloader import download_media, detect_platform, extract_video_info
 
@@ -50,6 +54,7 @@ def get_main_keyboard():
         [InlineKeyboardButton(text="📊 Моя статистика", callback_data="my_stats")],
         [InlineKeyboardButton(text="💳 Выбрать тариф", callback_data="show_tariffs")],
         [InlineKeyboardButton(text="🎁 Пригласить друга", callback_data="referral")],
+        [InlineKeyboardButton(text="🎉 Акция: Премиум БЕСПЛАТНО!", callback_data="show_promo")],
         [InlineKeyboardButton(text="📞 Связаться с админом", callback_data="contact_admin")]
     ])
 
@@ -80,6 +85,7 @@ def get_user_stats_keyboard():
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="💳 Выбрать тариф", callback_data="show_tariffs")],
         [InlineKeyboardButton(text="🎁 Пригласить друга", callback_data="referral")],
+        [InlineKeyboardButton(text="🎉 Акция: Премиум БЕСПЛАТНО!", callback_data="show_promo")],
         [InlineKeyboardButton(text="🏠 Главное меню", callback_data="main_menu")]
     ])
 
@@ -135,7 +141,8 @@ async def cmd_tariff(message: types.Message):
         "   • Поддержка видео до 200 МБ\n"
         "   • Умный кэш (мгновенная выдача)\n"
         "   • AI-описание и хештеги\n"
-        "   • Расшифровка аудио в текст",
+        "   • Расшифровка аудио в текст\n\n"
+        "🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!",
         parse_mode="Markdown",
         reply_markup=get_tariff_keyboard()
     )
@@ -150,6 +157,7 @@ async def cmd_stats(message: types.Message):
     tariff = await get_user_tariff(user_id)
     tariff_info = TARIFFS.get(tariff, TARIFFS["free"])
     referral_info = await get_referral_info(user_id)
+    premium_count = await get_paid_premium_count(user_id)
     
     if stats:
         text = (
@@ -164,7 +172,10 @@ async def cmd_stats(message: types.Message):
             f"🎁 **Рефералы:**\n"
             f"• Приглашено: {referral_info['count']} друзей\n"
             f"• Награда за 1 друга: {'✅ Получен' if referral_info['standard_used'] else '❌ Не получен'}\n"
-            f"• Награда за 3 друзей: {'✅ Получен' if referral_info['premium_used'] else '❌ Не получен'}\n"
+            f"• Награда за 3 друзей: {'✅ Получен' if referral_info['premium_used'] else '❌ Не получен'}\n\n"
+            f"🎉 **Акция:**\n"
+            f"• Куплено Премиум: {premium_count} раз(а)\n"
+            f"• До бесплатного месяца: {3 - (premium_count % 3) if premium_count % 3 != 0 else 3} Премиум(а)"
         )
     else:
         text = "⚠️ Не удалось получить данные."
@@ -182,12 +193,15 @@ async def cmd_help(message: types.Message):
         "/tariff — Выбрать тариф\n"
         "/stats — Моя статистика\n"
         "/referral — Пригласить друга\n"
+        "/promo — Информация об акции\n"
         "/admin — Панель управления (админ)\n"
         "/help — Эта справка\n\n"
         "🔗 Просто отправь ссылку на видео — я скачаю его!\n\n"
         "🎁 **Реферальная программа:**\n"
         "• Пригласи 1 друга → получи Стандарт на месяц\n"
         "• Пригласи 3 друзей → получи Премиум на месяц\n\n"
+        "🎉 **Акция:**\n"
+        "• Каждый 3-й Премиум — БЕСПЛАТНО!\n\n"
         "📱 Поддерживаемые платформы:\n"
         "• TikTok\n"
         "• Instagram (Reels, видео)\n"
@@ -231,6 +245,35 @@ async def cmd_referral(message: types.Message):
     )
 
 # ==========================================
+# 🚀 КОМАНДА /PROMO - ИНФОРМАЦИЯ ОБ АКЦИИ
+# ==========================================
+@dp.message(Command("promo"))
+async def cmd_promo(message: types.Message):
+    user_id = message.from_user.id
+    count = await get_paid_premium_count(user_id)
+    
+    if count == 0:
+        text = (
+            "🎁 **Акция: каждый 3-й Премиум — БЕСПЛАТНО!**\n\n"
+            "Ты ещё не покупал Премиум.\n"
+            "Купи 3 раза и получи 4-й месяц в подарок! 🎉\n\n"
+            "💎 /tariff — выбрать тариф"
+        )
+    else:
+        next_free = 3 - (count % 3)
+        if next_free == 0:
+            next_free = 3
+        
+        text = (
+            "🎁 **Акция: каждый 3-й Премиум — БЕСПЛАТНО!**\n\n"
+            f"📊 Ты купил Премиум: **{count}** раз(а)\n"
+            f"🎯 Осталось оплатить: **{next_free}** Премиум(а) до бесплатного месяца!\n\n"
+            f"💎 /tariff — выбрать тариф"
+        )
+    
+    await message.answer(text, parse_mode="Markdown")
+
+# ==========================================
 # 🚀 КОМАНДА /START
 # ==========================================
 @dp.message(CommandStart())
@@ -259,6 +302,7 @@ async def start_cmd(message: types.Message):
         "🎁 **Пригласи друга — получи подписку!**\n"
         "• 1 друг → Стандарт на месяц\n"
         "• 3 друга → Премиум на месяц\n\n"
+        "🎉 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!\n\n"
         "💡 Для большего выбери подходящий тариф!",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
@@ -296,6 +340,36 @@ async def referral_callback(callback: types.CallbackQuery):
     await callback.answer()
 
 # ==========================================
+# 🚀 КНОПКА АКЦИИ
+# ==========================================
+@dp.callback_query(F.data == "show_promo")
+async def show_promo_callback(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    count = await get_paid_premium_count(user_id)
+    
+    if count == 0:
+        text = (
+            "🎁 **Акция: каждый 3-й Премиум — БЕСПЛАТНО!**\n\n"
+            "Ты ещё не покупал Премиум.\n"
+            "Купи 3 раза и получи 4-й месяц в подарок! 🎉\n\n"
+            "💎 Нажми «Выбрать тариф» чтобы начать."
+        )
+    else:
+        next_free = 3 - (count % 3)
+        if next_free == 0:
+            next_free = 3
+        
+        text = (
+            "🎁 **Акция: каждый 3-й Премиум — БЕСПЛАТНО!**\n\n"
+            f"📊 Ты купил Премиум: **{count}** раз(а)\n"
+            f"🎯 Осталось оплатить: **{next_free}** Премиум(а) до бесплатного месяца!\n\n"
+            f"💎 Нажми «Выбрать тариф» чтобы купить."
+        )
+    
+    await callback.message.edit_text(text, parse_mode="Markdown")
+    await callback.answer()
+
+# ==========================================
 # 🚀 КОМАНДА /ADMIN
 # ==========================================
 @dp.message(Command("admin"))
@@ -321,7 +395,8 @@ async def main_menu_callback(callback: types.CallbackQuery):
         "👋 **Главное меню**\n\n"
         "Отправь ссылку на видео — я скачаю его!\n\n"
         f"📊 Твой лимит: {FREE_DAILY_LIMIT} скачиваний в день.\n\n"
-        "🎁 Пригласи друга → получи подписку!",
+        "🎁 Пригласи друга → получи подписку!\n"
+        "🎉 Каждый 3-й Премиум — БЕСПЛАТНО!",
         parse_mode="Markdown",
         reply_markup=get_main_keyboard()
     )
@@ -338,7 +413,8 @@ async def show_tariffs(callback: types.CallbackQuery):
         "💎 **Премиум** — 300 ₽/мес\n"
         "   • Безлимит\n"
         "   • Все платформы\n"
-        "   • 4K, 200 МБ, AI-фишки",
+        "   • 4K, 200 МБ, AI-фишки\n\n"
+        "🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!",
         parse_mode="Markdown",
         reply_markup=get_tariff_keyboard()
     )
@@ -351,6 +427,7 @@ async def my_stats_callback(callback: types.CallbackQuery):
     tariff = await get_user_tariff(user_id)
     tariff_info = TARIFFS.get(tariff, TARIFFS["free"])
     referral_info = await get_referral_info(user_id)
+    premium_count = await get_paid_premium_count(user_id)
     
     if stats:
         text = (
@@ -360,7 +437,8 @@ async def my_stats_callback(callback: types.CallbackQuery):
             f"💎 Тариф: **{tariff_info['name']}**\n"
             f"📊 Статус: {'🟢 Активна' if stats['is_subscribed'] == 1 else '🔴 Не активна'}\n"
             f"📅 Действует до: {stats['sub_end_date'] or 'Нет'}\n\n"
-            f"🎁 Приглашено: {referral_info['count']} друзей"
+            f"🎁 Приглашено: {referral_info['count']} друзей\n"
+            f"🎉 Куплено Премиум: {premium_count} раз(а)"
         )
     else:
         text = "⚠️ Не удалось получить данные."
@@ -585,7 +663,8 @@ async def process_tariff_selection(callback: types.CallbackQuery):
     if tariff_key == "free":
         await callback.message.edit_text(
             "📱 **Бесплатный тариф активен!**\n\n"
-            "3 скачивания в день.",
+            "3 скачивания в день.\n\n"
+            "🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!",
             parse_mode="Markdown",
             reply_markup=get_main_keyboard()
         )
@@ -604,7 +683,8 @@ async def process_tariff_selection(callback: types.CallbackQuery):
         chat_id=callback.from_user.id,
         title=f"Подписка «{tariff['name']}»",
         description=f"Тариф {tariff['name']} на 30 дней.\n"
-                    f"Лимит: {tariff['daily_limit']} скачиваний/день",
+                    f"Лимит: {tariff['daily_limit']} скачиваний/день\n"
+                    f"🎁 Каждый 3-й Премиум — БЕСПЛАТНО!",
         payload=f"sub_{tariff_key}_payload",
         provider_token="",
         currency="XTR",
@@ -624,14 +704,62 @@ async def process_successful_payment(message: types.Message):
     if tariff_key not in ["standard", "premium"]:
         tariff_key = "standard"
     
-    await activate_subscription(message.from_user.id, tariff_key)
+    user_id = message.from_user.id
+    
+    # 🔥 ПРОВЕРЯЕМ АКЦИЮ ДЛЯ ПРЕМИУМА
+    if tariff_key == "premium":
+        # Проверяем, есть ли право на бесплатный Премиум
+        if await is_free_premium_available(user_id):
+            # Отмечаем, что использовали бесплатный
+            await mark_free_premium_used(user_id)
+            
+            # Даём следующий месяц бесплатно (БЕЗ ОПЛАТЫ)
+            await activate_free_premium(user_id)
+            
+            await message.answer(
+                f"🎉 **ПОЗДРАВЛЯЮ!**\n\n"
+                f"Ты оплатил **3-й Премиум**!\n"
+                f"По акции ты получаешь **следующий месяц БЕСПЛАТНО**! 🎁\n\n"
+                f"💎 Тариф «Премиум» активирован на 30 дней!\n"
+                f"💰 Сумма к оплате: **0 ₽**",
+                parse_mode="Markdown"
+            )
+            
+            # Отправляем уведомление админу
+            await bot.send_message(
+                ADMIN_ID,
+                f"🎁 **АКЦИЯ АКТИВИРОВАНА!**\n\n"
+                f"👤 Пользователь `{user_id}` получил бесплатный Премиум!\n"
+                f"📊 Это его 3-й оплаченный Премиум.",
+                parse_mode="Markdown"
+            )
+            return
+    
+    # Обычная активация
+    await activate_subscription(user_id, tariff_key)
     tariff = TARIFFS.get(tariff_key, TARIFFS["standard"])
     
-    await message.answer(
-        f"🎉 **Оплата прошла успешно!**\n\n"
-        f"Тариф «{tariff['name']}» активирован на 30 дней!",
-        parse_mode="Markdown"
-    )
+    # Показываем прогресс акции
+    if tariff_key == "premium":
+        count = await get_paid_premium_count(user_id)
+        next_free = 3 - (count % 3)
+        if next_free == 0:
+            next_free = 3
+        
+        await message.answer(
+            f"🎉 **Оплата прошла успешно!**\n\n"
+            f"💎 Тариф «{tariff['name']}» активирован на 30 дней!\n\n"
+            f"🎁 **Акция:** каждый 3-й Премиум — БЕСПЛАТНО!\n"
+            f"📊 Осталось оплатить: **{next_free}** Премиум(а) до бесплатного месяца!",
+            parse_mode="Markdown"
+        )
+    else:
+        await message.answer(
+            f"🎉 **Оплата прошла успешно!**\n\n"
+            f"📊 Тариф «{tariff['name']}» активирован на 30 дней!\n\n"
+            f"💡 Переходи на Премиум — каждый 3-й месяц БЕСПЛАТНО!",
+            parse_mode="Markdown"
+        )
 
 # ==========================================
 # 🚀 ОСНОВНОЙ ОБРАБОТЧИК ССЫЛОК (С ПРЕДПРОСМОТРОМ)
@@ -735,6 +863,102 @@ async def handle_unknown(message: types.Message):
     )
 
 # ==========================================
+# 🔔 ФОНОВЫЙ ТАСК ДЛЯ ПРОВЕРКИ ПОДПИСОК (ПУШИ)
+# ==========================================
+async def check_subscriptions():
+    """
+    Проверяет подписки и отправляет дружелюбные уведомления.
+    Запускается каждые 6 часов.
+    """
+    while True:
+        try:
+            # 🔔 За 3 дня до окончания
+            expiring_soon = await get_expiring_subs(3)
+            for user in expiring_soon:
+                try:
+                    tariff = await get_user_tariff(user["user_id"])
+                    
+                    if tariff == "premium":
+                        msg = (
+                            f"👋 Привет!\n\n"
+                            f"Твой Премиум заканчивается через **3 дня**.\n"
+                            f"📅 Последний день: {user['sub_end_date']}\n\n"
+                            f"Если хочешь сохранить безлимит — продли подписку:\n"
+                            f"/tariff"
+                        )
+                    else:
+                        msg = (
+                            f"👋 Привет!\n\n"
+                            f"Твой Стандарт заканчивается через **3 дня**.\n"
+                            f"📅 Последний день: {user['sub_end_date']}\n\n"
+                            f"Если хочешь продолжить скачивать без ограничений — продли подписку:\n"
+                            f"/tariff"
+                        )
+                    
+                    await bot.send_message(user["user_id"], msg, parse_mode="Markdown")
+                    await asyncio.sleep(0.5)
+                except Exception:
+                    pass
+            
+            # 🔔 За 1 день до окончания
+            expiring_soon = await get_expiring_subs(1)
+            for user in expiring_soon:
+                try:
+                    tariff = await get_user_tariff(user["user_id"])
+                    
+                    if tariff == "premium":
+                        msg = (
+                            f"⏰ Привет! Напоминаю, что завтра заканчивается Премиум.\n\n"
+                            f"📅 Последний день: {user['sub_end_date']}\n\n"
+                            f"Чтобы сохранить безлимит — продли через /tariff.\n"
+                            f"Если нет — перейдёшь на Бесплатный тариф (3 видео в день)."
+                        )
+                    else:
+                        msg = (
+                            f"⏰ Привет! Напоминаю, что завтра заканчивается Стандарт.\n\n"
+                            f"📅 Последний день: {user['sub_end_date']}\n\n"
+                            f"Чтобы сохранить 30 скачиваний в день — продли через /tariff.\n"
+                            f"Если нет — перейдёшь на Бесплатный тариф (3 видео в день)."
+                        )
+                    
+                    await bot.send_message(user["user_id"], msg, parse_mode="Markdown")
+                    await asyncio.sleep(0.5)
+                except Exception:
+                    pass
+            
+            # 🔔 В день окончания
+            expired_today = await get_expired_today()
+            for user in expired_today:
+                try:
+                    tariff = await get_user_tariff(user["user_id"])
+                    
+                    if tariff == "premium":
+                        msg = (
+                            f"👋 Привет! Сегодня последний день Премиума.\n\n"
+                            f"📅 Заканчивается сегодня: {user['sub_end_date']}\n\n"
+                            f"Чтобы остаться с безлимитом — продли через /tariff.\n"
+                            f"Если нет — перейдёшь на Бесплатный тариф (3 видео в день)."
+                        )
+                    else:
+                        msg = (
+                            f"👋 Привет! Сегодня последний день Стандарта.\n\n"
+                            f"📅 Заканчивается сегодня: {user['sub_end_date']}\n\n"
+                            f"Чтобы остаться с 30 скачиваниями в день — продли через /tariff.\n"
+                            f"Если нет — перейдёшь на Бесплатный тариф (3 видео в день)."
+                        )
+                    
+                    await bot.send_message(user["user_id"], msg, parse_mode="Markdown")
+                    await asyncio.sleep(0.5)
+                except Exception:
+                    pass
+            
+            await asyncio.sleep(21600)  # 6 часов
+            
+        except Exception as e:
+            print(f"❌ Ошибка в check_subscriptions: {e}")
+            await asyncio.sleep(3600)
+
+# ==========================================
 # 🚀 HTTP-СЕРВЕР ДЛЯ RENDER
 # ==========================================
 async def handle_healthcheck(request):
@@ -757,6 +981,7 @@ async def start_dummy_server():
 async def main():
     await init_db()
     asyncio.create_task(start_dummy_server())
+    asyncio.create_task(check_subscriptions())  # 🔥 ЗАПУСКАЕМ ФОНОВЫЙ ТАСК С ПУШАМИ
     print("🤖 Бот успешно запущен!")
     await dp.start_polling(bot)
 
