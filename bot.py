@@ -84,7 +84,7 @@ def get_user_stats_keyboard():
     ])
 
 # ==========================================
-# КОМАНДА /TARIFF
+# 🚀 КОМАНДА /TARIFF
 # ==========================================
 @dp.message(Command("tariff"))
 async def cmd_tariff(message: types.Message):
@@ -111,7 +111,7 @@ async def cmd_tariff(message: types.Message):
     )
 
 # ==========================================
-# КОМАНДА /STATS
+# 🚀 КОМАНДА /STATS
 # ==========================================
 @dp.message(Command("stats"))
 async def cmd_stats(message: types.Message):
@@ -142,7 +142,7 @@ async def cmd_stats(message: types.Message):
     await message.answer(text, parse_mode="Markdown", reply_markup=get_user_stats_keyboard())
 
 # ==========================================
-# КОМАНДА /HELP
+# 🚀 КОМАНДА /HELP
 # ==========================================
 @dp.message(Command("help"))
 async def cmd_help(message: types.Message):
@@ -171,7 +171,7 @@ async def cmd_help(message: types.Message):
     )
 
 # ==========================================
-# КОМАНДА /REFERRAL
+# 🚀 КОМАНДА /REFERRAL
 # ==========================================
 @dp.message(Command("referral"))
 async def cmd_referral(message: types.Message):
@@ -201,7 +201,7 @@ async def cmd_referral(message: types.Message):
     )
 
 # ==========================================
-# КОМАНДА /START
+# 🚀 КОМАНДА /START
 # ==========================================
 @dp.message(CommandStart())
 async def start_cmd(message: types.Message):
@@ -235,7 +235,7 @@ async def start_cmd(message: types.Message):
     )
 
 # ==========================================
-# РЕФЕРАЛЬНАЯ КНОПКА
+# 🚀 РЕФЕРАЛЬНАЯ КНОПКА
 # ==========================================
 @dp.callback_query(F.data == "referral")
 async def referral_callback(callback: types.CallbackQuery):
@@ -266,11 +266,12 @@ async def referral_callback(callback: types.CallbackQuery):
     await callback.answer()
 
 # ==========================================
-# КОМАНДА /ADMIN
+# 🚀 КОМАНДА /ADMIN
 # ==========================================
 @dp.message(Command("admin"))
 async def admin_panel(message: types.Message, state: FSMContext):
     if message.from_user.id != ADMIN_ID:
+        await message.answer("⛔ У тебя нет прав для выполнения этой команды.")
         return
     
     await state.clear()
@@ -281,7 +282,7 @@ async def admin_panel(message: types.Message, state: FSMContext):
     )
 
 # ==========================================
-# ОБРАБОТЧИКИ КНОПОК
+# 🚀 ОБРАБОТЧИКИ КНОПОК
 # ==========================================
 
 @dp.callback_query(F.data == "main_menu")
@@ -370,7 +371,7 @@ async def process_user_message_to_admin(message: types.Message, state: FSMContex
     await state.clear()
 
 # ==========================================
-# АДМИН-ОБРАБОТЧИКИ
+# 🚀 АДМИН-ОБРАБОТЧИКИ
 # ==========================================
 @dp.callback_query(F.data.startswith("admin_"))
 async def process_admin_callbacks(callback: types.CallbackQuery, state: FSMContext):
@@ -508,7 +509,7 @@ async def process_answer_to_user(message: types.Message, state: FSMContext):
     await state.clear()
 
 # ==========================================
-# ЭКСПОРТ
+# 🚀 ЭКСПОРТ
 # ==========================================
 async def export_database(message: types.Message):
     if message.from_user.id != ADMIN_ID:
@@ -545,7 +546,7 @@ async def export_database(message: types.Message):
         await message.answer(f"⚠️ Ошибка: {str(e)}")
 
 # ==========================================
-# ТАРИФЫ И ОПЛАТА
+# 🚀 ТАРИФЫ И ОПЛАТА
 # ==========================================
 @dp.callback_query(F.data.startswith("tariff_"))
 async def process_tariff_selection(callback: types.CallbackQuery):
@@ -603,7 +604,7 @@ async def process_successful_payment(message: types.Message):
     )
 
 # ==========================================
-# ОСНОВНОЙ ОБРАБОТЧИК ССЫЛОК
+# 🚀 ОСНОВНОЙ ОБРАБОТЧИК ССЫЛОК
 # ==========================================
 @dp.message(F.text.startswith(("http://", "https://")))
 async def handle_link(message: types.Message):
@@ -648,7 +649,7 @@ async def handle_link(message: types.Message):
             os.remove(file_path)
 
 # ==========================================
-# НЕИЗВЕСТНЫЕ СООБЩЕНИЯ
+# 🚀 НЕИЗВЕСТНЫЕ СООБЩЕНИЯ
 # ==========================================
 @dp.message(F.text)
 async def handle_unknown(message: types.Message):
@@ -660,7 +661,7 @@ async def handle_unknown(message: types.Message):
     )
 
 # ==========================================
-# HTTP-СЕРВЕР ДЛЯ RENDER
+# 🚀 HTTP-СЕРВЕР ДЛЯ RENDER
 # ==========================================
 async def handle_healthcheck(request):
     return web.Response(text="Bot is alive!")
@@ -677,11 +678,11 @@ async def start_dummy_server():
     print(f"✅ HTTP-сервер запущен на порту {port}")
 
 # ==========================================
-# ЗАПУСК
+# 🚀 ЗАПУСК
 # ==========================================
 async def main():
     await init_db()
-    asyncio.create_task(start_dummy_server())  # 🔥 ФОНОВЫЙ ЗАПУСК!
+    asyncio.create_task(start_dummy_server())
     print("🤖 Бот успешно запущен!")
     await dp.start_polling(bot)
 
