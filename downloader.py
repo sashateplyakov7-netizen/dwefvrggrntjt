@@ -1,6 +1,7 @@
 import asyncio
 import os
 import re
+import random
 import yt_dlp
 from datetime import datetime
 from urllib.parse import urlparse, parse_qs
@@ -50,6 +51,12 @@ def _sync_download(url: str, output_path: str) -> bool:
         ydl_opts.update({
             'format': 'bestvideo[height<=1080][ext=mp4]+bestaudio[ext=m4a]/best[height<=1080][ext=mp4]/best',
             'cookiesfrombrowser': ('chrome',),
+            'http_headers': {
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'Accept-Encoding': 'gzip, deflate, br',
+                'Accept-Language': 'en-US,en;q=0.5',
+                'Connection': 'keep-alive',
+            }
         })
     
     elif platform == "pinterest.com":
@@ -70,6 +77,56 @@ def _sync_download(url: str, output_path: str) -> bool:
         })
     
     elif platform == "t.me":
+        ydl_opts.update({
+            'format': 'best[ext=mp4]/best',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        })
+    
+    # 🌍 НОВЫЕ ПЛАТФОРМЫ
+    elif platform in ["vk.com", "vkontakte.ru"]:
+        ydl_opts.update({
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'cookiesfrombrowser': ('chrome',),
+        })
+    
+    elif platform == "likee.com":
+        ydl_opts.update({
+            'format': 'best[ext=mp4]/best',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        })
+    
+    elif platform == "rutube.ru":
+        ydl_opts.update({
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        })
+    
+    elif platform == "twitch.tv":
+        ydl_opts.update({
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'cookiesfrombrowser': ('chrome',),
+        })
+    
+    elif platform == "coub.com":
+        ydl_opts.update({
+            'format': 'best[ext=mp4]/best',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        })
+    
+    elif platform == "tumblr.com":
+        ydl_opts.update({
+            'format': 'best[ext=mp4]/best',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        })
+    
+    elif platform == "dailymotion.com":
+        ydl_opts.update({
+            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        })
+    
+    elif platform == "9gag.com":
         ydl_opts.update({
             'format': 'best[ext=mp4]/best',
             'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -281,3 +338,46 @@ async def download_audio(url: str, output_path: str) -> bool:
             return False
     
     return await asyncio.to_thread(_sync_audio)
+
+# ==========================================
+# 🔥 НОВАЯ ФУНКЦИЯ: ЗАГРУЗКА С ROTATING USER-AGENT
+# ==========================================
+async def download_media_rotating(url: str, output_path: str) -> bool:
+    """
+    Скачивание с ротацией User-Agent для обхода блокировок.
+    """
+    def _sync_rotating():
+        user_agents = [
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
+            'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+            'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15',
+            'Mozilla/5.0 (Windows NT 10.0; rv:109.0) Gecko/20100101 Firefox/117.0',
+            'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36',
+        ]
+        ua = random.choice(user_agents)
+        
+        ydl_opts = {
+            'format': 'b[ext=mp4][filesize<50M]/best[ext=mp4][filesize<50M]/best[filesize<50M]/best',
+            'outtmpl': output_path,
+            'quiet': True,
+            'no_warnings': True,
+            'noplaylist': True,
+            'max_filesize': MAX_FILE_SIZE,
+            'concurrent_fragment_downloads': 5,
+            'socket_timeout': 10,
+            'user_agent': ua,
+            'retries': 15,
+            'fragment_retries': 15,
+            'cookiesfrombrowser': ('chrome',),
+        }
+        
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            return os.path.exists(output_path)
+        except Exception as e:
+            print(f"❌ Ошибка загрузки с ротацией: {e}", flush=True)
+            return False
+    
+    return await asyncio.to_thread(_sync_rotating)
