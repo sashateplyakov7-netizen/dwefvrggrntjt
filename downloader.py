@@ -65,7 +65,7 @@ def get_youtube_cookies() -> dict:
 # ==========================================
 # 🌍 ПРОКСИ (из переменных окружения)
 # ==========================================
-PROXY_URL = os.getenv("PROXY_URL")  # http://user:pass@host:port
+PROXY_URL = os.getenv("PROXY_URL")
 
 # ==========================================
 # СПИСОК USER-AGENT ДЛЯ РОТАЦИИ
@@ -89,12 +89,9 @@ def detect_platform(url: str) -> str:
     return "unknown"
 
 # ==========================================
-# 🔥 ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ КАЧЕСТВ (SD, HD, FULL HD)
+# 🔥 ФУНКЦИЯ ДЛЯ ПОЛУЧЕНИЯ КАЧЕСТВ
 # ==========================================
 def get_format_for_quality(quality: str) -> str:
-    """
-    Возвращает формат для yt-dlp в зависимости от качества.
-    """
     quality_formats = {
         "sd": 'bestvideo[height<=480][ext=mp4]+bestaudio[ext=m4a]/best[height<=480][ext=mp4]/best[filesize<50M]',
         "hd": 'bestvideo[height<=720][ext=mp4]+bestaudio[ext=m4a]/best[height<=720][ext=mp4]/best[filesize<100M]',
@@ -104,21 +101,450 @@ def get_format_for_quality(quality: str) -> str:
     return quality_formats.get(quality, quality_formats["best"])
 
 # ==========================================
-# ОСНОВНАЯ ФУНКЦИЯ ЗАГРУЗКИ (С ПОДДЕРЖКОЙ КАЧЕСТВА)
+# 🔥 УНИВЕРСАЛЬНЫЙ ОБХОДНОЙ ПУТЬ ДЛЯ ВСЕХ ПЛАТФОРМ
+# ==========================================
+def universal_fallback(url: str, output_path: str) -> bool:
+    """
+    Универсальный обходной путь для всех платформ.
+    Пробует разные форматы и методы.
+    """
+    try:
+        print("🔄 Универсальный обходной путь...", flush=True)
+        
+        # Пробуем с максимально простыми опциями
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': output_path,
+            'quiet': True,
+            'no_warnings': True,
+            'noplaylist': True,
+            'ignoreerrors': True,
+            'no_check_certificate': True,
+            'prefer_insecure': True,
+            'user_agent': random.choice(USER_AGENTS),
+            'extract_flat': False,
+            'socket_timeout': 30,
+            'retries': 10,
+        }
+        
+        # Пробуем через стандартный yt-dlp
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        
+        if os.path.exists(output_path):
+            print(f"✅ Универсальный обходной путь сработал!", flush=True)
+            return True
+        
+        # Если не сработало, пробуем через requests (для прямых ссылок)
+        import requests
+        print("🔄 Пробуем прямой запрос...", flush=True)
+        headers = {'User-Agent': random.choice(USER_AGENTS)}
+        response = requests.get(url, headers=headers, timeout=30, stream=True)
+        
+        if response.status_code == 200:
+            content_type = response.headers.get('content-type', '')
+            if 'video' in content_type or 'mp4' in content_type:
+                with open(output_path, 'wb') as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                return os.path.exists(output_path)
+        
+        return False
+        
+    except Exception as e:
+        print(f"❌ Универсальный обходной путь не сработал: {e}", flush=True)
+        return False
+
+# ==========================================
+# 🔥 СПЕЦИАЛЬНЫЕ ОБХОДНЫЕ ПУТИ ДЛЯ ПЛАТФОРМ
+# ==========================================
+
+def fallback_youtube(url: str, output_path: str) -> bool:
+    """Обходной путь для YouTube (включая Shorts)"""
+    try:
+        print("🔄 YouTube fallback...", flush=True)
+        
+        # Извлекаем ID видео
+        match = re.search(r"(?:v=|/)([a-zA-Z0-9_-]{11})", url)
+        if not match:
+            return False
+        
+        video_id = match.group(1)
+        
+        # Пробуем через альтернативный URL
+        alt_urls = [
+            f"https://www.youtube.com/watch?v={video_id}",
+            f"https://youtu.be/{video_id}",
+        ]
+        
+        for alt_url in alt_urls:
+            try:
+                ydl_opts = {
+                    'format': 'best[ext=mp4]/best',
+                    'outtmpl': output_path,
+                    'quiet': True,
+                    'no_warnings': True,
+                    'noplaylist': True,
+                    'ignoreerrors': True,
+                    'no_check_certificate': True,
+                    'prefer_insecure': True,
+                    'user_agent': random.choice(USER_AGENTS),
+                }
+                
+                if COOKIES_FILE:
+                    ydl_opts['cookiefile'] = COOKIES_FILE
+                
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ydl.download([alt_url])
+                
+                if os.path.exists(output_path):
+                    return True
+            except:
+                continue
+        
+        return False
+    except Exception as e:
+        print(f"❌ YouTube fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_tiktok(url: str, output_path: str) -> bool:
+    """Обходной путь для TikTok"""
+    try:
+        import requests
+        print("🔄 TikTok fallback...", flush=True)
+        
+        # Пробуем через TikWM API
+        api_url = f"https://www.tikwm.com/api/?url={url}"
+        response = requests.get(api_url, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            if data.get("code") == 0:
+                video_url = data["data"]["play"]
+                import urllib.request
+                urllib.request.urlretrieve(video_url, output_path)
+                return os.path.exists(output_path)
+        
+        # Пробуем через SnapTik
+        print("🔄 Пробуем SnapTik...", flush=True)
+        # Здесь можно добавить парсинг SnapTik
+        
+        return False
+    except Exception as e:
+        print(f"❌ TikTok fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_instagram(url: str, output_path: str) -> bool:
+    """Обходной путь для Instagram"""
+    try:
+        import requests
+        print("🔄 Instagram fallback...", flush=True)
+        
+        # Пробуем через публичный API
+        headers = {'User-Agent': random.choice(USER_AGENTS)}
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            # Ищем видео в HTML
+            match = re.search(r'"video_url":"([^"]+)"', response.text)
+            if match:
+                video_url = match.group(1).replace('\\', '')
+                import urllib.request
+                urllib.request.urlretrieve(video_url, output_path)
+                return os.path.exists(output_path)
+        
+        return False
+    except Exception as e:
+        print(f"❌ Instagram fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_facebook(url: str, output_path: str) -> bool:
+    """Обходной путь для Facebook"""
+    try:
+        import requests
+        print("🔄 Facebook fallback...", flush=True)
+        
+        headers = {'User-Agent': random.choice(USER_AGENTS)}
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            # Ищем видео в HTML
+            match = re.search(r'"playable_url":"([^"]+)"', response.text)
+            if match:
+                video_url = match.group(1).replace('\\', '')
+                import urllib.request
+                urllib.request.urlretrieve(video_url, output_path)
+                return os.path.exists(output_path)
+        
+        return False
+    except Exception as e:
+        print(f"❌ Facebook fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_twitter(url: str, output_path: str) -> bool:
+    """Обходной путь для Twitter/X"""
+    try:
+        import requests
+        print("🔄 Twitter fallback...", flush=True)
+        
+        # Пробуем через API
+        api_url = f"https://twitsave.com/info?url={url}"
+        response = requests.get(api_url, timeout=15)
+        
+        if response.status_code == 200:
+            # Парсим HTML
+            match = re.search(r'href="([^"]+)"[^>]*download', response.text)
+            if match:
+                video_url = match.group(1)
+                import urllib.request
+                urllib.request.urlretrieve(video_url, output_path)
+                return os.path.exists(output_path)
+        
+        return False
+    except Exception as e:
+        print(f"❌ Twitter fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_reddit(url: str, output_path: str) -> bool:
+    """Обходной путь для Reddit"""
+    try:
+        import requests
+        print("🔄 Reddit fallback...", flush=True)
+        
+        # Добавляем .json
+        json_url = url + ".json" if not url.endswith('.json') else url
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        response = requests.get(json_url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            data = response.json()
+            # Ищем видео в JSON
+            if isinstance(data, list) and len(data) > 0:
+                post = data[0].get('data', {}).get('children', [{}])[0].get('data', {})
+                video_url = post.get('secure_media', {}).get('reddit_video', {}).get('fallback_url')
+                if video_url:
+                    import urllib.request
+                    urllib.request.urlretrieve(video_url, output_path)
+                    return os.path.exists(output_path)
+        
+        return False
+    except Exception as e:
+        print(f"❌ Reddit fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_pinterest(url: str, output_path: str) -> bool:
+    """Обходной путь для Pinterest"""
+    try:
+        import requests
+        from bs4 import BeautifulSoup
+        print("🔄 Pinterest fallback...", flush=True)
+        
+        headers = {'User-Agent': random.choice(USER_AGENTS)}
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.text, 'html.parser')
+            # Ищем видео
+            video_tags = soup.find_all('video')
+            for video in video_tags:
+                src = video.get('src')
+                if src and src.startswith('http'):
+                    import urllib.request
+                    urllib.request.urlretrieve(src, output_path)
+                    return os.path.exists(output_path)
+        
+        return False
+    except Exception as e:
+        print(f"❌ Pinterest fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_vimeo(url: str, output_path: str) -> bool:
+    """Обходной путь для Vimeo"""
+    try:
+        import requests
+        print("🔄 Vimeo fallback...", flush=True)
+        
+        # Пробуем через API
+        match = re.search(r'/(\d+)', url)
+        if match:
+            video_id = match.group(1)
+            api_url = f"https://vimeo.com/api/v2/video/{video_id}.json"
+            response = requests.get(api_url, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                if data and len(data) > 0:
+                    video_url = data[0].get('url')
+                    if video_url:
+                        import urllib.request
+                        urllib.request.urlretrieve(video_url, output_path)
+                        return os.path.exists(output_path)
+        
+        return False
+    except Exception as e:
+        print(f"❌ Vimeo fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_twitch(url: str, output_path: str) -> bool:
+    """Обходной путь для Twitch"""
+    try:
+        print("🔄 Twitch fallback...", flush=True)
+        # Twitch требует специальных заголовков
+        ydl_opts = {
+            'format': 'best[ext=mp4]/best',
+            'outtmpl': output_path,
+            'quiet': True,
+            'no_warnings': True,
+            'noplaylist': True,
+            'user_agent': random.choice(USER_AGENTS),
+        }
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            ydl.download([url])
+        return os.path.exists(output_path)
+    except Exception as e:
+        print(f"❌ Twitch fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_vk(url: str, output_path: str) -> bool:
+    """Обходной путь для VK"""
+    try:
+        import requests
+        print("🔄 VK fallback...", flush=True)
+        
+        headers = {'User-Agent': random.choice(USER_AGENTS)}
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            # Ищем видео в HTML
+            match = re.search(r'"url":"([^"]+)"', response.text)
+            if match:
+                video_url = match.group(1).replace('\\', '')
+                if video_url.startswith('http'):
+                    import urllib.request
+                    urllib.request.urlretrieve(video_url, output_path)
+                    return os.path.exists(output_path)
+        
+        return False
+    except Exception as e:
+        print(f"❌ VK fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_rutube(url: str, output_path: str) -> bool:
+    """Обходной путь для Rutube"""
+    try:
+        import requests
+        print("🔄 Rutube fallback...", flush=True)
+        
+        # Пробуем через API
+        match = re.search(r'/video/(\d+)', url)
+        if match:
+            video_id = match.group(1)
+            api_url = f"https://rutube.ru/api/play/video/{video_id}/"
+            response = requests.get(api_url, timeout=15)
+            
+            if response.status_code == 200:
+                data = response.json()
+                video_url = data.get('video_url')
+                if video_url:
+                    import urllib.request
+                    urllib.request.urlretrieve(video_url, output_path)
+                    return os.path.exists(output_path)
+        
+        return False
+    except Exception as e:
+        print(f"❌ Rutube fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_dailymotion(url: str, output_path: str) -> bool:
+    """Обходной путь для Dailymotion"""
+    try:
+        import requests
+        print("🔄 Dailymotion fallback...", flush=True)
+        
+        # Пробуем через API
+        match = re.search(r'/video/([^_]+)', url)
+        if match:
+            video_id = match.group(1)
+            api_url = f"https://www.dailymotion.com/video/{video_id}"
+            response = requests.get(api_url, timeout=15)
+            
+            if response.status_code == 200:
+                match = re.search(r'"video_url":"([^"]+)"', response.text)
+                if match:
+                    video_url = match.group(1).replace('\\', '')
+                    import urllib.request
+                    urllib.request.urlretrieve(video_url, output_path)
+                    return os.path.exists(output_path)
+        
+        return False
+    except Exception as e:
+        print(f"❌ Dailymotion fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_9gag(url: str, output_path: str) -> bool:
+    """Обходной путь для 9GAG"""
+    try:
+        import requests
+        print("🔄 9GAG fallback...", flush=True)
+        
+        headers = {'User-Agent': random.choice(USER_AGENTS)}
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            # Ищем видео в HTML
+            match = re.search(r'"video":"([^"]+)"', response.text)
+            if match:
+                video_url = match.group(1).replace('\\', '')
+                import urllib.request
+                urllib.request.urlretrieve(video_url, output_path)
+                return os.path.exists(output_path)
+        
+        return False
+    except Exception as e:
+        print(f"❌ 9GAG fallback не сработал: {e}", flush=True)
+        return False
+
+def fallback_telegram(url: str, output_path: str) -> bool:
+    """Обходной путь для Telegram"""
+    try:
+        import requests
+        print("🔄 Telegram fallback...", flush=True)
+        
+        headers = {'User-Agent': random.choice(USER_AGENTS)}
+        response = requests.get(url, headers=headers, timeout=15)
+        
+        if response.status_code == 200:
+            # Ищем ссылки на видео
+            match = re.search(r'href="([^"]+\.mp4)"', response.text)
+            if match:
+                video_url = match.group(1)
+                if not video_url.startswith('http'):
+                    video_url = 'https://t.me' + video_url
+                import urllib.request
+                urllib.request.urlretrieve(video_url, output_path)
+                return os.path.exists(output_path)
+        
+        return False
+    except Exception as e:
+        print(f"❌ Telegram fallback не сработал: {e}", flush=True)
+        return False
+
+# ==========================================
+# ОСНОВНАЯ ФУНКЦИЯ ЗАГРУЗКИ
 # ==========================================
 def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
-    """
-    Синхронная загрузка медиа с поддержкой качества.
-    quality: sd, hd, fullhd, best
-    """
     platform = detect_platform(url)
-    print(f"🔍 [DEBUG] Платформа определена: {platform}")
+    is_shorts = "shorts/" in url or "/shorts/" in url
+    
+    print(f"🔍 [DEBUG] Платформа: {platform}")
     print(f"🎬 [DEBUG] Качество: {quality}")
     
-    # Получаем формат для качества
+    if is_shorts:
+        print(f"📱 [DEBUG] YouTube Shorts!", flush=True)
+    
     format_str = get_format_for_quality(quality)
     
-    # Базовые опции
     ydl_opts = {
         'format': format_str,
         'outtmpl': output_path,
@@ -137,22 +563,24 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
         'ffmpeg_location': '/usr/bin/ffmpeg' if os.name != 'nt' else None,
         'sleep_interval': 1,
         'max_sleep_interval': 5,
-        'sleep_interval_requests': 1,
         'user_agent': random.choice(USER_AGENTS),
     }
     
-    # 🔥 ДОБАВЛЯЕМ ПРОКСИ (если есть)
+    if is_shorts:
+        ydl_opts.update({
+            'format': 'bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4]/best',
+            'no_check_certificate': True,
+            'prefer_insecure': True,
+        })
+    
     if PROXY_URL:
         ydl_opts['proxy'] = PROXY_URL
-        print(f"🌍 Используется прокси: {PROXY_URL}")
     
-    # 🍪 ОБНОВЛЯЕМ КУКИ ДЛЯ YOUTUBE
-    if platform in ["youtube.com", "youtu.be"]:
+    # 🔥 КУКИ ДЛЯ YOUTUBE
+    if platform in ["youtube.com", "youtu.be"] or is_shorts:
         cookies = get_youtube_cookies()
         if cookies:
             ydl_opts.update(cookies)
-        
-        # Специальные заголовки для YouTube
         ydl_opts['http_headers'] = {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
@@ -165,157 +593,128 @@ def _sync_download(url: str, output_path: str, quality: str = "best") -> bool:
         }
     
     # 🔥 ОПЦИИ ДЛЯ КОНКРЕТНЫХ ПЛАТФОРМ
-    if platform == "tiktok.com":
-        ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        })
-        if COOKIES_FILE:
-            ydl_opts['cookiefile'] = COOKIES_FILE
+    platform_opts = {
+        "tiktok.com": {'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'},
+        "instagram.com": {'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'},
+        "facebook.com": {'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'},
+        "pinterest.com": {'format': 'best[ext=mp4]/best'},
+        "twitter.com": {'format': 'best[ext=mp4]/best'},
+        "x.com": {'format': 'best[ext=mp4]/best'},
+        "reddit.com": {'format': 'bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best'},
+        "vimeo.com": {'format': 'bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best'},
+        "t.me": {'format': 'best[ext=mp4]/best'},
+        "vk.com": {'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'},
+        "vkontakte.ru": {'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'},
+        "likee.com": {'format': 'best[ext=mp4]/best'},
+        "rutube.ru": {'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'},
+        "twitch.tv": {'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'},
+        "coub.com": {'format': 'best[ext=mp4]/best'},
+        "tumblr.com": {'format': 'best[ext=mp4]/best'},
+        "dailymotion.com": {'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best'},
+        "9gag.com": {'format': 'best[ext=mp4]/best'},
+    }
     
-    elif platform in ["instagram.com", "facebook.com"]:
-        ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        })
+    for key, opts in platform_opts.items():
+        if key in platform:
+            ydl_opts.update(opts)
+            break
     
-    elif platform in ["youtube.com", "youtu.be"]:
-        # Уже настроено выше
-        pass
+    # ==========================================
+    # 🔥 4 ПОПЫТКИ СКАЧИВАНИЯ
+    # ==========================================
     
-    elif platform == "pinterest.com":
-        ydl_opts.update({
-            'format': 'best[ext=mp4]/best',
-        })
-    
-    elif platform in ["twitter.com", "x.com"]:
-        ydl_opts.update({
-            'format': 'best[ext=mp4]/best',
-        })
-    
-    elif platform in ["reddit.com", "vimeo.com"]:
-        ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio/best[ext=mp4]/best',
-        })
-    
-    elif platform == "t.me":
-        ydl_opts.update({
-            'format': 'best[ext=mp4]/best',
-        })
-    
-    elif platform in ["vk.com", "vkontakte.ru"]:
-        ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        })
-    
-    elif platform == "likee.com":
-        ydl_opts.update({
-            'format': 'best[ext=mp4]/best',
-        })
-    
-    elif platform == "rutube.ru":
-        ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        })
-    
-    elif platform == "twitch.tv":
-        ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        })
-    
-    elif platform == "coub.com":
-        ydl_opts.update({
-            'format': 'best[ext=mp4]/best',
-        })
-    
-    elif platform == "tumblr.com":
-        ydl_opts.update({
-            'format': 'best[ext=mp4]/best',
-        })
-    
-    elif platform == "dailymotion.com":
-        ydl_opts.update({
-            'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        })
-    
-    elif platform == "9gag.com":
-        ydl_opts.update({
-            'format': 'best[ext=mp4]/best',
-        })
-    
+    # 1️⃣ СТАНДАРТНАЯ
     try:
-        print(f"📥 [DEBUG] Начинаю скачивание с {platform}: {url}", flush=True)
-        
+        print(f"📥 [1] Стандартная загрузка...", flush=True)
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             ydl.download([url])
-        
         if os.path.exists(output_path):
-            file_size = os.path.getsize(output_path) / (1024 * 1024)
-            print(f"✅ Загрузка завершена! Размер: {file_size:.2f} МБ", flush=True)
+            print(f"✅ Загрузка завершена!", flush=True)
             return True
-        else:
-            print(f"❌ Файл не найден: {output_path}", flush=True)
-            return False
-            
-    except yt_dlp.utils.DownloadError as e:
-        print(f"❌ Ошибка yt-dlp: {e}", flush=True)
-        
-        # 🔥 АЛЬТЕРНАТИВНЫЙ ФОРМАТ
-        try:
-            print("🔄 Пробуем альтернативный формат...", flush=True)
-            fallback_opts = ydl_opts.copy()
-            fallback_opts['format'] = 'best'
-            with yt_dlp.YoutubeDL(fallback_opts) as ydl:
-                ydl.download([url])
-            return os.path.exists(output_path)
-        except Exception as e2:
-            print(f"❌ Альтернативная загрузка не удалась: {e2}", flush=True)
-            
-            # 🍪 РЕЗЕРВ: ПОПЫТКА ЧЕРЕЗ API ДЛЯ TIKTOK
-            if platform == "tiktok.com":
-                print("🔄 Пробуем скачать через альтернативный API...", flush=True)
-                try:
-                    import requests
-                    api_url = f"https://www.tikwm.com/api/?url={url}"
-                    response = requests.get(api_url, timeout=10)
-                    if response.status_code == 200:
-                        data = response.json()
-                        if data.get("code") == 0:
-                            video_url = data["data"]["play"]
-                            import urllib.request
-                            urllib.request.urlretrieve(video_url, output_path)
-                            return os.path.exists(output_path)
-                except Exception as e3:
-                    print(f"❌ Альтернативный API не сработал: {e3}")
-            
-            return False
-            
     except Exception as e:
-        print(f"❌ Ошибка загрузки: {e}", flush=True)
-        return False
+        print(f"❌ [1] Ошибка: {e}", flush=True)
+    
+    # 2️⃣ АЛЬТЕРНАТИВНЫЙ ФОРМАТ
+    try:
+        print(f"📥 [2] Альтернативный формат...", flush=True)
+        fallback_opts = ydl_opts.copy()
+        fallback_opts['format'] = 'best'
+        with yt_dlp.YoutubeDL(fallback_opts) as ydl:
+            ydl.download([url])
+        if os.path.exists(output_path):
+            return True
+    except Exception as e:
+        print(f"❌ [2] Ошибка: {e}", flush=True)
+    
+    # 3️⃣ БЕЗ КУК
+    if COOKIES_FILE or 'cookiefile' in ydl_opts:
+        try:
+            print(f"📥 [3] Без кук...", flush=True)
+            no_cookies_opts = ydl_opts.copy()
+            no_cookies_opts.pop('cookiefile', None)
+            no_cookies_opts.pop('http_headers', None)
+            no_cookies_opts['format'] = 'best'
+            with yt_dlp.YoutubeDL(no_cookies_opts) as ydl:
+                ydl.download([url])
+            if os.path.exists(output_path):
+                return True
+        except Exception as e:
+            print(f"❌ [3] Ошибка: {e}", flush=True)
+    
+    # 4️⃣ СПЕЦИАЛЬНЫЙ ОБХОДНОЙ ПУТЬ ДЛЯ ПЛАТФОРМЫ
+    print(f"📥 [4] Обходной путь для {platform}...", flush=True)
+    
+    fallbacks = {
+        "youtube.com": fallback_youtube,
+        "youtu.be": fallback_youtube,
+        "tiktok.com": fallback_tiktok,
+        "instagram.com": fallback_instagram,
+        "facebook.com": fallback_facebook,
+        "twitter.com": fallback_twitter,
+        "x.com": fallback_twitter,
+        "reddit.com": fallback_reddit,
+        "pinterest.com": fallback_pinterest,
+        "vimeo.com": fallback_vimeo,
+        "twitch.tv": fallback_twitch,
+        "vk.com": fallback_vk,
+        "vkontakte.ru": fallback_vk,
+        "rutube.ru": fallback_rutube,
+        "dailymotion.com": fallback_dailymotion,
+        "9gag.com": fallback_9gag,
+        "t.me": fallback_telegram,
+    }
+    
+    for key, fallback_func in fallbacks.items():
+        if key in platform:
+            if fallback_func(url, output_path):
+                return True
+            break
+    
+    # 5️⃣ УНИВЕРСАЛЬНЫЙ ОБХОДНОЙ ПУТЬ (ПОСЛЕДНИЙ ШАНС)
+    print(f"📥 [5] Универсальный обходной путь...", flush=True)
+    if universal_fallback(url, output_path):
+        return True
+    
+    print(f"❌ Все попытки загрузки не удались!", flush=True)
+    return False
 
 # ==========================================
-# АСИНХРОННАЯ ОБЁРТКА (С ПОДДЕРЖКОЙ КАЧЕСТВА)
+# АСИНХРОННАЯ ОБЁРТКА
 # ==========================================
 async def download_media(url: str, output_path: str, quality: str = "best") -> bool:
-    """
-    Асинхронная загрузка медиа с поддержкой множества платформ.
-    quality: sd, hd, fullhd, best
-    """
-    print(f"🚀 [DEBUG] download_media вызвана для: {url}, качество: {quality}")
+    print(f"🚀 download_media: {url}, качество: {quality}")
     return await asyncio.to_thread(_sync_download, url, output_path, quality)
 
 # ==========================================
-# 🔥 ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО (УЛУЧШЕННАЯ)
+# ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО
 # ==========================================
 def extract_video_info(url: str) -> dict:
-    """
-    Извлекает информацию о видео без скачивания.
-    Возвращает: {title, duration, views, likes, uploader, thumbnail, platform}
-    Теперь использует куки для всех платформ!
-    """
+    is_shorts = "shorts/" in url or "/shorts/" in url
+    
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
-        'extract_flat': True,
+        'extract_flat': not is_shorts,
         'user_agent': random.choice(USER_AGENTS),
         'http_headers': {
             'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
@@ -325,11 +724,16 @@ def extract_video_info(url: str) -> dict:
         }
     }
     
-    # 🔥 ДОБАВЛЯЕМ КУКИ ДЛЯ ВСЕХ ПЛАТФОРМ
+    if is_shorts:
+        ydl_opts.update({
+            'ignoreerrors': True,
+            'no_check_certificate': True,
+            'prefer_insecure': True,
+        })
+    
     if COOKIES_FILE:
         ydl_opts['cookiefile'] = COOKIES_FILE
     
-    # 🔥 ДЛЯ YOUTUBE ДОБАВЛЯЕМ ДОПОЛНИТЕЛЬНЫЕ ЗАГОЛОВКИ
     if "youtube.com" in url or "youtu.be" in url:
         ydl_opts['http_headers'].update({
             'Sec-Fetch-Mode': 'navigate',
@@ -341,96 +745,26 @@ def extract_video_info(url: str) -> dict:
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
-            
             if not info:
                 return get_empty_info(url)
             
-            # Пробуем извлечь данные
-            title = info.get('title', info.get('fulltitle', 'Неизвестно'))
-            duration = info.get('duration', 0)
-            view_count = info.get('view_count', 0)
-            like_count = info.get('like_count', 0)
-            uploader = info.get('uploader', info.get('channel', 'Неизвестно'))
-            thumbnail = info.get('thumbnail', None)
-            extractor = info.get('extractor', 'unknown')
-            
-            # 🔥 ЕСЛИ НЕТ НАЗВАНИЯ — ПЫТАЕМСЯ ПОЛУЧИТЬ ЧЕРЕЗ ALTERNATIVE
-            if title == 'Неизвестно' or not title:
-                title = info.get('description', 'Видео')[:50]
-            
-            # 🔥 ЕСЛИ ВСЁ РАВНО НЕТ — ПЫТАЕМСЯ ИЗВЛЕЧЬ ИЗ URL
-            if title == 'Видео' or not title:
-                title = extract_title_from_url(url)
-            
             return {
-                "title": title,
-                "duration": duration,
-                "views": view_count,
-                "likes": like_count,
-                "uploader": uploader,
-                "thumbnail": thumbnail,
+                "title": info.get('title', info.get('fulltitle', 'Неизвестно'))[:50],
+                "duration": info.get('duration', 0),
+                "views": info.get('view_count', 0),
+                "likes": info.get('like_count', 0),
+                "uploader": info.get('uploader', info.get('channel', 'Неизвестно')),
+                "thumbnail": info.get('thumbnail', None),
                 "platform": detect_platform(url),
-                "extractor": extractor
+                "extractor": info.get('extractor', 'unknown')
             }
-            
-    except yt_dlp.utils.DownloadError as e:
-        print(f"❌ Ошибка извлечения информации: {e}", flush=True)
-        return get_empty_info(url)
     except Exception as e:
-        print(f"❌ Ошибка извлечения информации: {e}", flush=True)
+        print(f"❌ Ошибка извлечения: {e}", flush=True)
         return get_empty_info(url)
-
-def extract_title_from_url(url: str) -> str:
-    """Пытается извлечь название из URL"""
-    platform = detect_platform(url)
-    
-    if "youtube.com" in url or "youtu.be" in url:
-        # Пытаемся найти ID видео
-        match = re.search(r"(?:v=|/)([a-zA-Z0-9_-]{11})", url)
-        if match:
-            video_id = match.group(1)
-            return f"YouTube видео {video_id}"
-        return "YouTube видео"
-    
-    elif "tiktok.com" in url:
-        match = re.search(r"/video/(\d+)", url)
-        if match:
-            video_id = match.group(1)
-            return f"TikTok видео {video_id}"
-        return "TikTok видео"
-    
-    elif "instagram.com" in url:
-        match = re.search(r"/reel/([^/?]+)", url)
-        if match:
-            video_id = match.group(1)
-            return f"Instagram Reel {video_id}"
-        return "Instagram видео"
-    
-    elif "pinterest.com" in url:
-        return "Pinterest видео"
-    
-    elif "twitter.com" in url or "x.com" in url:
-        return "Twitter/X видео"
-    
-    elif "facebook.com" in url:
-        return "Facebook видео"
-    
-    elif "reddit.com" in url:
-        return "Reddit видео"
-    
-    elif "vimeo.com" in url:
-        match = re.search(r"/(\d+)", url)
-        if match:
-            video_id = match.group(1)
-            return f"Vimeo видео {video_id}"
-        return "Vimeo видео"
-    
-    return "Видео"
 
 def get_empty_info(url: str) -> dict:
-    """Возвращает пустую информацию о видео"""
     return {
-        "title": extract_title_from_url(url),
+        "title": "Видео",
         "duration": 0,
         "views": 0,
         "likes": 0,
@@ -441,7 +775,7 @@ def get_empty_info(url: str) -> dict:
     }
 
 # ==========================================
-# ЗАГРУЗКА С ПРОГРЕССОМ
+# ОСТАЛЬНЫЕ ФУНКЦИИ (БЕЗ ИЗМЕНЕНИЙ)
 # ==========================================
 async def download_media_with_progress(url: str, output_path: str, progress_callback, quality: str = "best") -> bool:
     def _sync_with_progress():
@@ -476,9 +810,6 @@ async def download_media_with_progress(url: str, output_path: str, progress_call
             return False
     return await asyncio.to_thread(_sync_with_progress)
 
-# ==========================================
-# ПРОВЕРКА ВАЛИДНОСТИ ССЫЛКИ
-# ==========================================
 async def is_valid_url(url: str) -> bool:
     try:
         info = await asyncio.to_thread(extract_video_info, url)
@@ -486,16 +817,9 @@ async def is_valid_url(url: str) -> bool:
     except Exception:
         return False
 
-# ==========================================
-# ЗАГРУЗКА В ВЫСОКОМ КАЧЕСТВЕ (DEPRECATED)
-# ==========================================
 async def download_media_hq(url: str, output_path: str) -> bool:
-    """Используй download_media(url, output_path, 'fullhd') вместо этого"""
     return await download_media(url, output_path, "fullhd")
 
-# ==========================================
-# ЗАГРУЗКА ТОЛЬКО АУДИО
-# ==========================================
 async def download_audio(url: str, output_path: str) -> bool:
     def _sync_audio():
         ydl_opts = {
@@ -525,9 +849,6 @@ async def download_audio(url: str, output_path: str) -> bool:
             return False
     return await asyncio.to_thread(_sync_audio)
 
-# ==========================================
-# 🔥 ЗАГРУЗКА С РОТАЦИЕЙ USER-AGENT
-# ==========================================
 async def download_media_rotating(url: str, output_path: str, quality: str = "best") -> bool:
     def _sync_rotating():
         ua = random.choice(USER_AGENTS)
@@ -557,13 +878,7 @@ async def download_media_rotating(url: str, output_path: str, quality: str = "be
             return False
     return await asyncio.to_thread(_sync_rotating)
 
-# ==========================================
-# 🔥 ДОПОЛНИТЕЛЬНАЯ: ПОЛУЧЕНИЕ ДОСТУПНЫХ КАЧЕСТВ
-# ==========================================
 def get_available_qualities(url: str) -> list:
-    """
-    Возвращает список доступных качеств для видео.
-    """
     try:
         ydl_opts = {
             'quiet': True,
@@ -579,7 +894,6 @@ def get_available_qualities(url: str) -> list:
             if not info:
                 return ["sd"]
             
-            # Проверяем доступные форматы
             formats = info.get('formats', [])
             heights = set()
             for f in formats:
