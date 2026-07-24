@@ -1,4 +1,67 @@
+# Python
 __pycache__/
+*.py[cod]
+*.pyo
+*.so
+.Python
+*.egg-info/
+*.egg
+dist/
+build/
+*.spec
+
+# Виртуальные окружения
+venv/
+.venv/
+env/
+ENV/
+
+# Базы данных
 *.db
-*.mp4
+*.sqlite
+*.sqlite3
+
+# Переменные окружения
 .env
+.env.local
+.env.*.local
+
+# Файлы с секретами
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
+# Логи и временные файлы
+*.log
+temp_*.mp4
+*.mp4
+*.webp
+*.jpg
+*.jpeg
+*.png
+
+# Бэкапы
+*.bak
+*.backup
+*.tmp
+
+# IDE и редакторы
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Файлы отчётов и тестов
+*.coverage
+htmlcov/
+.pytest_cache/
+.tox/
+
+# Деплой и конфиги
+.env.*
+docker-compose.override.yml
+.DS_Store
