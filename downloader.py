@@ -164,47 +164,139 @@ def universal_fallback(url: str, output_path: str) -> bool:
 # ==========================================
 
 def fallback_youtube(url: str, output_path: str) -> bool:
+    """Обходной путь для YouTube с несколькими клиентами"""
     try:
         print("🔄 YouTube fallback...", flush=True)
         
         match = re.search(r"(?:v=|/)([a-zA-Z0-9_-]{11})", url)
         if not match:
+            print("❌ Не удалось извлечь ID видео")
             return False
         
         video_id = match.group(1)
+        alt_url = f"https://www.youtube.com/watch?v={video_id}"
+        print(f"   ID видео: {video_id}")
         
-        alt_urls = [
-            f"https://www.youtube.com/watch?v={video_id}",
-            f"https://youtu.be/{video_id}",
-        ]
+        # 🔥 МЕТОД 1: mweb клиент (мобильный сайт)
+        try:
+            print("   🔹 Метод 1: mweb клиент...", flush=True)
+            ydl_opts = {
+                'format': 'best[ext=mp4]/best',
+                'outtmpl': output_path,
+                'quiet': True,
+                'no_warnings': True,
+                'noplaylist': True,
+                'ignoreerrors': True,
+                'no_check_certificate': True,
+                'prefer_insecure': True,
+                'user_agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['mweb'],
+                    }
+                },
+                'socket_timeout': 30,
+                'retries': 5,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([alt_url])
+            if os.path.exists(output_path):
+                print("   ✅ Метод 1 (mweb) сработал!")
+                return True
+        except Exception as e:
+            print(f"   ❌ Метод 1 не сработал: {str(e)[:100]}", flush=True)
         
-        for alt_url in alt_urls:
-            try:
-                ydl_opts = {
-                    'format': 'best[ext=mp4]/best',
-                    'outtmpl': output_path,
-                    'quiet': True,
-                    'no_warnings': True,
-                    'noplaylist': True,
-                    'ignoreerrors': True,
-                    'no_check_certificate': True,
-                    'prefer_insecure': True,
-                    'user_agent': random.choice(USER_AGENTS),
-                    'socket_timeout': 20,
-                    'retries': 3,
-                }
-                
-                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                    ydl.download([alt_url])
-                
-                if os.path.exists(output_path):
-                    return True
-            except:
-                continue
+        # 🔥 МЕТОД 2: android клиент
+        try:
+            print("   🔹 Метод 2: android клиент...", flush=True)
+            ydl_opts = {
+                'format': 'best[ext=mp4]/best',
+                'outtmpl': output_path,
+                'quiet': True,
+                'no_warnings': True,
+                'noplaylist': True,
+                'ignoreerrors': True,
+                'no_check_certificate': True,
+                'prefer_insecure': True,
+                'user_agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['android'],
+                    }
+                },
+                'socket_timeout': 30,
+                'retries': 5,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([alt_url])
+            if os.path.exists(output_path):
+                print("   ✅ Метод 2 (android) сработал!")
+                return True
+        except Exception as e:
+            print(f"   ❌ Метод 2 не сработал: {str(e)[:100]}", flush=True)
+        
+        # 🔥 МЕТОД 3: web клиент
+        try:
+            print("   🔹 Метод 3: web клиент...", flush=True)
+            ydl_opts = {
+                'format': 'best[ext=mp4]/best',
+                'outtmpl': output_path,
+                'quiet': True,
+                'no_warnings': True,
+                'noplaylist': True,
+                'ignoreerrors': True,
+                'no_check_certificate': True,
+                'prefer_insecure': True,
+                'user_agent': random.choice(USER_AGENTS),
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['web'],
+                    }
+                },
+                'socket_timeout': 30,
+                'retries': 5,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([alt_url])
+            if os.path.exists(output_path):
+                print("   ✅ Метод 3 (web) сработал!")
+                return True
+        except Exception as e:
+            print(f"   ❌ Метод 3 не сработал: {str(e)[:100]}", flush=True)
+        
+        # 🔥 МЕТОД 4: tv клиент (для TV)
+        try:
+            print("   🔹 Метод 4: tv клиент...", flush=True)
+            ydl_opts = {
+                'format': 'best[ext=mp4]/best',
+                'outtmpl': output_path,
+                'quiet': True,
+                'no_warnings': True,
+                'noplaylist': True,
+                'ignoreerrors': True,
+                'no_check_certificate': True,
+                'prefer_insecure': True,
+                'user_agent': 'Mozilla/5.0 (Linux; Tizen 5.5) AppleWebKit/537.36 (KHTML, like Gecko) SamsungBrowser/4.0 Chrome/72.0.3626.121 Safari/537.36',
+                'extractor_args': {
+                    'youtube': {
+                        'player_client': ['tv'],
+                    }
+                },
+                'socket_timeout': 30,
+                'retries': 5,
+            }
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([alt_url])
+            if os.path.exists(output_path):
+                print("   ✅ Метод 4 (tv) сработал!")
+                return True
+        except Exception as e:
+            print(f"   ❌ Метод 4 не сработал: {str(e)[:100]}", flush=True)
         
         return False
+        
     except Exception as e:
-        print(f"❌ YouTube fallback не сработал: {e}", flush=True)
+        print(f"❌ YouTube fallback полностью не сработал: {e}", flush=True)
         return False
 
 def fallback_tiktok(url: str, output_path: str) -> bool:
