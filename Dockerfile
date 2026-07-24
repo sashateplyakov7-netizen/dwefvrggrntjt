@@ -30,3 +30,4 @@ EXPOSE 8080
 
 # Запуск
 CMD ["python", "bot.py"]
+RUN apt-get update && apt-get install -y aria2
