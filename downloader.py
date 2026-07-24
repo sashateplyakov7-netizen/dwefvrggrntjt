@@ -115,6 +115,8 @@ def _sync_download(url: str, output_path: str) -> bool:
         'sleep_interval': 1,
         'max_sleep_interval': 5,
         'sleep_interval_requests': 1,
+        'external_downloader': 'aria2c',
+        'external_downloader_args': ['-x', '16', '-s', '16'],
     }
     
     # 🔥 ДОБАВЛЯЕМ ПРОКСИ (если есть)
