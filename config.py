@@ -33,14 +33,14 @@ TARIFFS = {
         "name": "Стандарт",
         "price": 100,        # 100 рублей
         "daily_limit": 30,
-        "platforms": ["tiktok", "instagram", "youtube", "pinterest", "twitter", "facebook"],
+        "platforms": ["tiktok", "instagram", "youtube", "pinterest", "twitter", "facebook", "reddit", "vimeo"],
         "max_duration": 300,
         "max_size": 50,
         "quality": "high"
     },
     "premium": {
         "name": "Премиум",
-        "price": 200,        # 200 рублей
+        "price": 300,        # 300 рублей (повысили)
         "daily_limit": 9999, # Безлимит
         "platforms": ["all"],
         "max_duration": 3600,
@@ -53,7 +53,7 @@ TARIFFS = {
 # 1 звезда = 2 рубля (комиссия Telegram ~30%)
 TARIFF_STARS = {
     "standard": 50,   # 100 руб / 2 = 50 звёзд
-    "premium": 100,   # 200 руб / 2 = 100 звёзд
+    "premium": 150,   # 300 руб / 2 = 150 звёзд
 }
 
 # ==========================================
@@ -62,9 +62,43 @@ TARIFF_STARS = {
 DEFAULT_TARIFF = "free"
 SUB_DURATION_DAYS = 30  # Длительность подписки в днях
 MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 МБ для yt-dlp
-SUPPORTED_PLATFORMS = ["tiktok", "instagram", "youtube", "pinterest", "twitter", "facebook", "reddit", "vimeo"]
+
+# ==========================================
+# 🔥 ВСЕ ПОДДЕРЖИВАЕМЫЕ ПЛАТФОРМЫ
+# ==========================================
+SUPPORTED_PLATFORMS = [
+    # Основные
+    "tiktok.com",
+    "instagram.com",
+    "youtube.com",
+    "youtu.be",
+    "pinterest.com",
+    "twitter.com",
+    "x.com",
+    "facebook.com",
+    "reddit.com",
+    "vimeo.com",
+    "t.me",
+    # Новые
+    "vk.com",
+    "vkontakte.ru",
+    "likee.com",
+    "rutube.ru",
+    "twitch.tv",
+    "coub.com",
+    "tumblr.com",
+    "dailymotion.com",
+    "9gag.com",
+]
 
 # ==========================================
 # 🔥 ИМЯ БОТА ДЛЯ РЕФЕРАЛЬНЫХ ССЫЛОК
 # ==========================================
-BOT_USERNAME = "Dowlander_Dowo_Bot"  # БЕЗ @, например: "download_video_bot"
+BOT_USERNAME = "Downloader_Dowo_Bot"  # БЕЗ @
+
+# ==========================================
+# ЮMONEY (ОПЦИОНАЛЬНО)
+# ==========================================
+YOOMONEY_TOKEN = os.getenv("YOOMONEY_TOKEN")
+YOOMONEY_WALLET = os.getenv("YOOMONEY_WALLET")
+YOOMONEY_REDIRECT_URI = os.getenv("YOOMONEY_REDIRECT_URI", "https://t.me/Downloader_Dowo_Bot")
