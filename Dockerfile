@@ -1,5 +1,6 @@
 FROM python:3.11-slim
-
+# Запусти в терминале Render или добавь в Dockerfile
+playwright install chromium
 # Установка ffmpeg
 RUN apt-get update && apt-get install -y \
     ffmpeg \
