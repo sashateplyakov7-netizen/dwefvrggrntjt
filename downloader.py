@@ -295,44 +295,90 @@ async def download_media(url: str, output_path: str) -> bool:
     return await asyncio.to_thread(_sync_download, url, output_path)
 
 # ==========================================
-# ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО
+# 🔥 ИЗВЛЕЧЕНИЕ ИНФОРМАЦИИ О ВИДЕО (УЛУЧШЕННАЯ)
 # ==========================================
 def extract_video_info(url: str) -> dict:
+    """
+    Извлекает информацию о видео без скачивания.
+    Возвращает: {title, duration, views, likes, uploader, thumbnail}
+    Теперь использует куки для всех платформ!
+    """
     ydl_opts = {
         'quiet': True,
         'no_warnings': True,
         'extract_flat': True,
+        'user_agent': random.choice(USER_AGENTS),
+        'http_headers': {
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Connection': 'keep-alive',
+        }
     }
     
+    # 🔥 ДОБАВЛЯЕМ КУКИ ДЛЯ ВСЕХ ПЛАТФОРМ
+    if COOKIES_FILE:
+        ydl_opts['cookiefile'] = COOKIES_FILE
+    
+    # 🔥 ДЛЯ YOUTUBE ДОБАВЛЯЕМ ДОПОЛНИТЕЛЬНЫЕ ЗАГОЛОВКИ
     if "youtube.com" in url or "youtu.be" in url:
-        if COOKIES_FILE:
-            ydl_opts['cookiefile'] = COOKIES_FILE
+        ydl_opts['http_headers'].update({
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Upgrade-Insecure-Requests': '1',
+        })
     
     try:
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
+            
+            if not info:
+                return get_empty_info(url)
+            
+            # Пробуем извлечь данные
+            title = info.get('title', 'Неизвестно')
+            duration = info.get('duration', 0)
+            view_count = info.get('view_count', 0)
+            like_count = info.get('like_count', 0)
+            uploader = info.get('uploader', info.get('channel', 'Неизвестно'))
+            thumbnail = info.get('thumbnail', None)
+            extractor = info.get('extractor', 'unknown')
+            
+            # 🔥 ЕСЛИ НЕТ НАЗВАНИЯ — ПЫТАЕМСЯ ПОЛУЧИТЬ ЧЕРЕЗ ALTERNATIVE
+            if title == 'Неизвестно' or not title:
+                title = info.get('fulltitle', info.get('description', 'Видео'))[:50]
+            
             return {
-                "title": info.get("title", "Неизвестно"),
-                "duration": info.get("duration", 0),
-                "views": info.get("view_count", 0),
-                "likes": info.get("like_count", 0),
-                "uploader": info.get("uploader", "Неизвестно"),
-                "thumbnail": info.get("thumbnail", None),
+                "title": title,
+                "duration": duration,
+                "views": view_count,
+                "likes": like_count,
+                "uploader": uploader,
+                "thumbnail": thumbnail,
                 "platform": detect_platform(url),
-                "extractor": info.get("extractor", "unknown")
+                "extractor": extractor
             }
+            
+    except yt_dlp.utils.DownloadError as e:
+        print(f"❌ Ошибка извлечения информации: {e}", flush=True)
+        return get_empty_info(url)
     except Exception as e:
         print(f"❌ Ошибка извлечения информации: {e}", flush=True)
-        return {
-            "title": "Неизвестно",
-            "duration": 0,
-            "views": 0,
-            "likes": 0,
-            "uploader": "Неизвестно",
-            "thumbnail": None,
-            "platform": detect_platform(url),
-            "extractor": "unknown"
-        }
+        return get_empty_info(url)
+
+def get_empty_info(url: str) -> dict:
+    """Возвращает пустую информацию о видео"""
+    return {
+        "title": "Не удалось получить название",
+        "duration": 0,
+        "views": 0,
+        "likes": 0,
+        "uploader": "Неизвестно",
+        "thumbnail": None,
+        "platform": detect_platform(url),
+        "extractor": "unknown"
+    }
 
 # ==========================================
 # ЗАГРУЗКА С ПРОГРЕССОМ
