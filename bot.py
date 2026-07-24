@@ -2,7 +2,17 @@ import asyncio
 import os
 import random
 import yt_dlp
-from config import MAX_FILE_SIZE, SUPPORTED_PLATFORMS
+
+# ==========================================
+# НАСТРОЙКИ (перенесены из config)
+# ==========================================
+MAX_FILE_SIZE = 50 * 1024 * 1024  # 50 МБ в байтах
+SUPPORTED_PLATFORMS = [
+    "tiktok.com", "instagram.com", "facebook.com", "youtube.com", "youtu.be",
+    "pinterest.com", "twitter.com", "x.com", "reddit.com", "vimeo.com", "t.me",
+    "vk.com", "vkontakte.ru", "likee.com", "rutube.ru", "twitch.tv", "coub.com",
+    "tumblr.com", "dailymotion.com", "9gag.com"
+]
 
 # ==========================================
 # КУКИ — АВТОМАТИЧЕСКИ ПОДГРУЖАЮТСЯ
