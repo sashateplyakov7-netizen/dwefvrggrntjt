@@ -96,10 +96,12 @@ SUPPORTED_PLATFORMS = [
 BOT_USERNAME = "Downloader_Dowo_Bot"  # БЕЗ @
 
 # ==========================================
-# ЮMONEY (ОПЦИОНАЛЬНО)
+# 💳 ЮMONEY (ДОБАВЛЕНО)
 # ==========================================
-YOOMONEY_TOKEN = os.getenv("YOOMONEY_TOKEN")
-YOOMONEY_WALLET = os.getenv("YOOMONEY_WALLET")
+YOOMONEY_SHOP_ID = os.getenv("YOOMONEY_SHOP_ID")        # ID магазина
+YOOMONEY_SECRET_KEY = os.getenv("YOOMONEY_SECRET_KEY")  # Секретный ключ
+YOOMONEY_TOKEN = os.getenv("YOOMONEY_TOKEN")            # Токен для API (опционально)
+YOOMONEY_WALLET = os.getenv("YOOMONEY_WALLET")          # Номер кошелька (опционально)
 YOOMONEY_REDIRECT_URI = os.getenv("YOOMONEY_REDIRECT_URI", "https://t.me/Downloader_Dowo_Bot")
 
 # ==========================================
