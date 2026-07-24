@@ -13,9 +13,59 @@ from config import MAX_FILE_SIZE, SUPPORTED_PLATFORMS
 COOKIES_FILE = "DeepLegs" if os.path.exists("DeepLegs") else None
 
 if COOKIES_FILE:
-    print(f"🍪 Куки загружены: {COOKIES_FILE}")
+    print(f"🍪 Куки загружены из файла: {COOKIES_FILE}")
 else:
     print("⚠️ DeepLegs не найден. YouTube может не работать.")
+
+# ==========================================
+# 🧠 ФУНКЦИЯ ПОЛУЧЕНИЯ СВЕЖИХ КУК (ytc + Playwright)
+# ==========================================
+def get_youtube_cookies() -> dict:
+    """
+    Пытается получить свежие куки для YouTube.
+    Сначала пробует ytc, потом файл, потом Playwright.
+    Возвращает словарь с куками или None.
+    """
+    try:
+        import ytc
+        cookies_str = ytc.youtube()
+        if cookies_str:
+            print("🍪 Куки обновлены через ytc")
+            return {'http_headers': {'Cookie': cookies_str}}
+    except Exception as e:
+        print(f"⚠️ ytc не сработал: {e}")
+    
+    if COOKIES_FILE:
+        try:
+            with open(COOKIES_FILE, 'r') as f:
+                cookies_str = f.read().strip()
+                if cookies_str:
+                    print(f"🍪 Куки загружены из файла: {COOKIES_FILE}")
+                    return {'cookiefile': COOKIES_FILE}
+        except:
+            pass
+    
+    # Резерв: попытка через Playwright (если файла нет или он устарел)
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['python', 'cookie_updater.py'],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0 and os.path.exists(COOKIES_FILE):
+            print("🍪 Куки обновлены через Playwright")
+            return {'cookiefile': COOKIES_FILE}
+    except Exception as e:
+        print(f"⚠️ Playwright не сработал: {e}")
+    
+    return None
+
+# ==========================================
+# 🌍 ПРОКСИ (из переменных окружения)
+# ==========================================
+PROXY_URL = os.getenv("PROXY_URL")  # http://user:pass@host:port
 
 # ==========================================
 # СПИСОК USER-AGENT ДЛЯ РОТАЦИИ
@@ -67,12 +117,22 @@ def _sync_download(url: str, output_path: str) -> bool:
         'sleep_interval_requests': 1,
     }
     
+    # 🔥 ДОБАВЛЯЕМ ПРОКСИ (если есть)
+    if PROXY_URL:
+        ydl_opts['proxy'] = PROXY_URL
+        print(f"🌍 Используется прокси: {PROXY_URL}")
+    
+    # 🍪 ОБНОВЛЯЕМ КУКИ ДЛЯ YOUTUBE
+    if platform in ["youtube.com", "youtu.be"]:
+        cookies = get_youtube_cookies()
+        if cookies:
+            ydl_opts.update(cookies)
+    
     # 🔥 ОПЦИИ ДЛЯ КОНКРЕТНЫХ ПЛАТФОРМ
     if platform == "tiktok.com":
         ydl_opts.update({
             'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
             'user_agent': random.choice(USER_AGENTS),
-            'cookiesfrombrowser': ('chrome',),
         })
         if COOKIES_FILE:
             ydl_opts['cookiefile'] = COOKIES_FILE
@@ -98,8 +158,6 @@ def _sync_download(url: str, output_path: str) -> bool:
                 'Upgrade-Insecure-Requests': '1',
             }
         })
-        if COOKIES_FILE:
-            ydl_opts['cookiefile'] = COOKIES_FILE
     
     elif platform == "pinterest.com":
         ydl_opts.update({
@@ -189,17 +247,19 @@ def _sync_download(url: str, output_path: str) -> bool:
             
     except yt_dlp.utils.DownloadError as e:
         print(f"❌ Ошибка yt-dlp: {e}", flush=True)
+        
+        # 🔥 АЛЬТЕРНАТИВНЫЙ ФОРМАТ
         try:
             print("🔄 Пробуем альтернативный формат...", flush=True)
             fallback_opts = ydl_opts.copy()
             fallback_opts['format'] = 'best'
-            fallback_opts['cookiefile'] = None
             with yt_dlp.YoutubeDL(fallback_opts) as ydl:
                 ydl.download([url])
             return os.path.exists(output_path)
         except Exception as e2:
             print(f"❌ Альтернативная загрузка не удалась: {e2}", flush=True)
             
+            # 🍪 РЕЗЕРВ: ПОПЫТКА ЧЕРЕЗ API ДЛЯ TIKTOK
             if platform == "tiktok.com":
                 print("🔄 Пробуем скачать через альтернативный API...", flush=True)
                 try:
